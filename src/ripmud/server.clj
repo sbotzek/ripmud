@@ -2,7 +2,7 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]))
 
-(defn start
+(defn run-telnet-server
   [{:keys [port] :as config}]
   (let [server-socket (java.net.ServerSocket. port)]
     (println (str "Server started on port " port))
@@ -21,5 +21,8 @@
 
 (defn -main
   []
-  (let [config (edn/read-string (slurp (io/resource "server-config.edn")))]
-    (start config)))
+  (let [config (edn/read-string (slurp (io/resource "server-config.edn")))
+        telnet-thread (Thread/startVirtualThread
+                       (fn telnet-handler[]
+                         (run-telnet-server config)))]
+    (.join telnet-thread)))
