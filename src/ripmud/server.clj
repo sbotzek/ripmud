@@ -42,12 +42,15 @@
 
 (defn run-system
   [system pulse]
-  (let [{:keys [f pulses components updates-components]} system]
+  (let [{:keys [f name pulses components updates-components]} system]
     (when (zero? (mod pulse pulses))
-      (let [entities (map first (filter (fn [[k v]] (every? v components)) @*entity-components))
+      (let [start-time (System/currentTimeMillis)
+            entities (map first (filter (fn [[k v]] (every? v components)) @*entity-components))
             components-examining (select-keys @*components components)
             components-and-entities-examining (into {} (map (fn [[k v]] [k (select-keys v entities)]) components-examining))
-            components' (f components-and-entities-examining)]
+            components' (f components-and-entities-examining)
+            elapsed-time (- (System/currentTimeMillis) start-time)]
+        (println "System" name "took" elapsed-time "ms, started with" components-and-entities-examining "returned" components')
         (dosync
          (alter *components merge components'))))))
 
@@ -70,26 +73,35 @@
 
 (defn slurp-telnet-inputs
   [components]
-  #_(println "slurp-telnet-inputs - start -" components)
   (if-let [{:keys [entity-id line]} (.poll telnet-inputs)]
     (recur (update-in components [:telnet-input entity-id :input] conj line))
-    (do
-      #_(println "slurp-telnet-inputs - end -" components)
-      components)))
+    components))
 
 (defn process-telnet-inputs
   [components]
-  #_(println "process-telnet-inputs - start -" components)
-  (let [*telnet-input-components (atom (:telnet-input components))]
+  (let [*telnet-input-components (atom (:telnet-input components))
+        *telnet-output-components (atom (:telnet-output components))]
     (doseq [[entity telnet-input] @*telnet-input-components]
       (let [telnet-output (get-in components [:telnet-output entity])]
         (when-let [[line & rest] (:input telnet-input)]
           (when (and line (not= "" line))
-            (.write (:out telnet-output) (str "You said: " line "\n"))
-            (.flush (:out telnet-output)))
+            (swap! *telnet-output-components update-in [entity :output] conj (str "You said: " line "\n")))
           (swap! *telnet-input-components assoc entity {:input rest}))))
-    #_(println "process-telnet-inputs - end -" @*telnet-input-components)
-    (assoc components :telnet-input @*telnet-input-components)))
+    (assoc components
+           :telnet-input @*telnet-input-components
+           :telnet-output @*telnet-output-components)))
+
+(defn write-telnet-outputs
+  [components]
+  (let [*telnet-output-components (atom (:telnet-output components))]
+    (doseq [[entity telnet-output] @*telnet-output-components]
+      (when-let [[line & rest] (:output telnet-output)]
+        (when line
+          (.write (:out telnet-output) line)
+          (.flush (:out telnet-output)))
+        (swap! *telnet-output-components assoc-in [entity :output] rest)))
+    (assoc components
+           :telnet-output @*telnet-output-components)))
 
 (defn run-telnet-server
   [{:keys [port] :as config}]
@@ -114,13 +126,20 @@
   []
   (reset! systems
           [{:f slurp-telnet-inputs
+            :name "slurp-telnet-inputs"
             :pulses 1
             :components [:telnet-input]
             :updates-components [:telnet-input]}
            {:f process-telnet-inputs
+            :name "process-telnet-inputs"
             :pulses 1
             :components [:telnet-input :telnet-output]
-            :updates-components [:telnet-input]}])
+            :updates-components [:telnet-input :telnet-output]}
+           {:f write-telnet-outputs
+            :name "write-telnet-outputs"
+            :pulses 1
+            :components [:telnet-output]
+            :updates-components [:telnet-output]}])
   (let [config (edn/read-string (slurp (io/resource "server-config.edn")))
         telnet-thread (Thread/startVirtualThread
                        (fn telnet-handler[]
