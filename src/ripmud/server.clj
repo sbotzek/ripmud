@@ -87,9 +87,8 @@
           (when (and line (not= "" line))
             (swap! *telnet-output-components update-in [entity :output] conj (str "You said: " line "\n")))
           (swap! *telnet-input-components assoc entity {:input rest}))))
-    (assoc components
-           :telnet-input @*telnet-input-components
-           :telnet-output @*telnet-output-components)))
+    {:telnet-input @*telnet-input-components
+     :telnet-output @*telnet-output-components}))
 
 (defn write-telnet-outputs
   [components]
@@ -100,8 +99,7 @@
           (.write (:out telnet-output) line)
           (.flush (:out telnet-output)))
         (swap! *telnet-output-components assoc-in [entity :output] rest)))
-    (assoc components
-           :telnet-output @*telnet-output-components)))
+    {:telnet-output @*telnet-output-components}))
 
 (defn run-telnet-server
   [{:keys [port] :as config}]
