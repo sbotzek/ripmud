@@ -52,7 +52,7 @@
             elapsed-time (- (System/currentTimeMillis) start-time)]
         (println "System" name "took" elapsed-time "ms, started with" components-and-entities-examining "returned" components')
         (dosync
-         (alter *components merge components'))))))
+         (alter *components merge (select-keys components' updates-components)))))))
 
 (defn run-game-server
   [config]
