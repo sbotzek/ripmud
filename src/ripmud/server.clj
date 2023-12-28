@@ -42,11 +42,11 @@
 
 (defn run-system
   [system pulse]
-  (let [{:keys [f name pulses components updates-components]} system]
+  (let [{:keys [f name pulses uses-components require-components updates-components]} system]
     (when (zero? (mod pulse pulses))
       (let [start-time (System/currentTimeMillis)
-            entities (map first (filter (fn [[k v]] (every? v components)) @*entity-components))
-            components-examining (select-keys @*components components)
+            entities (map first (filter (fn [[k v]] (every? v require-components)) @*entity-components))
+            components-examining (select-keys @*components uses-components)
             components-and-entities-examining (into {} (map (fn [[k v]] [k (select-keys v entities)]) components-examining))
             components' (f components-and-entities-examining)
             elapsed-time (- (System/currentTimeMillis) start-time)]
@@ -128,17 +128,20 @@
           [{:f slurp-telnet-inputs
             :name "slurp-telnet-inputs"
             :pulses 1
-            :components [:telnet-input]
+            :uses-components [:telnet-input]
+            :require-components [:telnet-input]
             :updates-components [:telnet-input]}
            {:f process-telnet-inputs
             :name "process-telnet-inputs"
             :pulses 1
-            :components [:telnet-input :telnet-output]
+            :uses-components [:telnet-input :telnet-output]
+            :require-components [:telnet-input :telnet-output]
             :updates-components [:telnet-input :telnet-output]}
            {:f write-telnet-outputs
             :name "write-telnet-outputs"
             :pulses 1
-            :components [:telnet-output]
+            :uses-components [:telnet-output]
+            :require-components [:telnet-output]
             :updates-components [:telnet-output]}])
   (let [config (edn/read-string (slurp (io/resource "server-config.edn")))
         telnet-thread (Thread/startVirtualThread
