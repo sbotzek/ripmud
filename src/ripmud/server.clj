@@ -93,12 +93,12 @@
 (defn write-telnet-outputs
   [components]
   (let [*telnet-output-components (atom (:telnet-output components))]
-    (doseq [[entity telnet-output] @*telnet-output-components]
-      (when-let [[line & rest] (:output telnet-output)]
-        (when line
-          (.write (:out telnet-output) line)
-          (.flush (:out telnet-output)))
-        (swap! *telnet-output-components assoc-in [entity :output] rest)))
+    (doseq [[entity {:keys [output out] :as telnet-output}] @*telnet-output-components]
+      (when (seq output)
+        (swap! *telnet-output-components assoc-in [entity :output] [])
+        (doseq [line output]
+          (.write out line))
+        (.flush out)))
     {:telnet-output @*telnet-output-components}))
 
 (defn run-telnet-server
