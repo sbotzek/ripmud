@@ -1,6 +1,7 @@
 (ns ripmud.server
   (:require [clojure.edn :as edn]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io]
+            [clojure.string :as str]))
 
 (def millis-per-pulse 250)
 
@@ -85,8 +86,10 @@
       (let [telnet-output (get-in components [:telnet-output entity])]
         (when-let [[line & rest] (:input telnet-input)]
           (when (and line (not= "" line))
-            (let [output (cond
-                           (= "jimmie" line)
+            (let [[cmd & args] (str/split line #"\s+")
+                  cmd (str/lower-case cmd)
+                  output (cond
+                           (= "jimmie" cmd)
                            "JIMMIEEEE! JIMMIE JIMMIE JIMMIESON!\n"
 
                            true
