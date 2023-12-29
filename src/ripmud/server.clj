@@ -85,7 +85,13 @@
       (let [telnet-output (get-in components [:telnet-output entity])]
         (when-let [[line & rest] (:input telnet-input)]
           (when (and line (not= "" line))
-            (swap! *telnet-output-components update-in [entity :output] conj (str "You said: " line "\n")))
+            (let [output (cond
+                           (= "jimmie" line)
+                           "JIMMIEEEE! JIMMIE JIMMIE JIMMIESON!\n"
+
+                           true
+                           (str "You said: " line "\n"))]
+              (swap! *telnet-output-components update-in [entity :output] conj output)))
           (swap! *telnet-input-components assoc entity {:input rest}))))
     {:telnet-input @*telnet-input-components
      :telnet-output @*telnet-output-components}))
