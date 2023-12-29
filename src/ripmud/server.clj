@@ -62,7 +62,9 @@
               (when (not= (count updates-components) 0)
                 (let [update-start-time (System/currentTimeMillis)]
                   (dosync
-                   (alter *components update (first updates-components) merge components'))
+                   (alter *components assoc (first updates-components) components')
+                   ;; slightly different behavior here, but its much slower than the above when we update everything
+                   #_(alter *components update (first updates-components) merge components'))
                   (reset! *update-ms (- (System/currentTimeMillis) update-start-time)))))
 
             ;; system function takes argument of the form:
@@ -161,7 +163,7 @@
 (defn write-telnet-outputs
   "Takes output from the telnet-output component and writes it to the socket."
   [components]
-  (let [*telnet-output-components (atom {})]
+  (let [*telnet-output-components (atom components)]
     (doseq [[entity {:keys [output out] :as telnet-output}] components]
       (when (seq output)
         (swap! *telnet-output-components assoc entity (assoc telnet-output :output []))
