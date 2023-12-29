@@ -84,7 +84,8 @@
                   _ (reset! *run-f-ms (- (System/currentTimeMillis) run-f-start-time))]
               (let [update-start-time (System/currentTimeMillis)]
                 (dosync
-                 (alter *components merge (select-keys components' updates-components)))
+                 (doseq [comp updates-components]
+                   (alter *components update comp merge (get components' comp))))
                 (reset! *update-ms (- (System/currentTimeMillis) update-start-time)))))
           (let [total-ms (- (System/currentTimeMillis) start-time)]
             (println "System" name "total ms:" total-ms "select ms:" @*select-ms "run-f ms:" @*run-f-ms "update ms:" @*update-ms)))
@@ -129,16 +130,18 @@
 (defn slurp-telnet-inputs
   "Reads from the global telnet-inputs queue and puts those lines into the entity's telnet-input component."
   [components]
-  (if-let [{:keys [entity-id line]} (.poll telnet-inputs)]
-    (recur (update-in components [:telnet-input entity-id :input] conj line))
-    components))
+  (loop [components' {}]
+    (if-let [{:keys [entity-id line]} (.poll telnet-inputs)]
+      (let [telnet-input (get-in components' [:telnet-input entity-id])]
+        (recur (assoc-in components' [:telnet-input entity-id] (update telnet-input :input conj line))))
+      components')))
 
 (defn process-telnet-inputs
   "Takes input from the telnet-input component and processes the command, writing any output to the telnet-output component."
   [components]
-  (let [*telnet-input-components (atom (:telnet-input components))
-        *telnet-output-components (atom (:telnet-output components))]
-    (doseq [[entity telnet-input] @*telnet-input-components]
+  (let [*telnet-input-components (atom {})
+        *telnet-output-components (atom {})]
+    (doseq [[entity telnet-input] (:telnet-input components)]
       (let [telnet-output (get-in components [:telnet-output entity])]
         (when-let [[line & rest] (:input telnet-input)]
           (when (and line (not= "" line))
@@ -150,8 +153,8 @@
 
                            true
                            (str "You said: " line "\n"))]
-              (swap! *telnet-output-components update-in [entity :output] conj output)))
-          (swap! *telnet-input-components assoc entity {:input rest}))))
+              (swap! *telnet-output-components assoc entity (update telnet-output :output conj output))))
+          (swap! *telnet-input-components assoc entity (assoc telnet-input :input rest)))))
     {:telnet-input @*telnet-input-components
      :telnet-output @*telnet-output-components}))
 
