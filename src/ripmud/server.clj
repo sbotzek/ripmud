@@ -47,6 +47,7 @@
     (when (zero? (mod pulse pulses))
       (let [start-time (System/currentTimeMillis)]
         (case f-arg
+          ;; system function takes argument of the form: {entity_1 {component}, entity_2 {component}, ....}
           :entities->component
           (let [entities->components (get @*components (first uses-components))
                 components' (f entities->components)
@@ -55,6 +56,10 @@
               (dosync
                (alter *components update (first updates-components) merge components'))))
 
+          ;; system function takes argument of the form:
+          ;; {component_type_1 {entity_1 {component}, entity_2 {component}, ...},
+          ;;  component_type_2 {entity_1 {component}, entity_2 {component}, ...},
+          ;;  ...}
           :types->entities->component
           (let [entities (map first (filter (fn [[k v]] (every? v require-components)) @*entity-components))
                 components-examining (select-keys @*components uses-components)
@@ -102,12 +107,14 @@
 (def telnet-inputs (java.util.concurrent.ConcurrentLinkedQueue.))
 
 (defn slurp-telnet-inputs
+  "Reads from the global telnet-inputs queue and puts those lines into the entity's telnet-input component."
   [components]
   (if-let [{:keys [entity-id line]} (.poll telnet-inputs)]
     (recur (update-in components [:telnet-input entity-id :input] conj line))
     components))
 
 (defn process-telnet-inputs
+  "Takes input from the telnet-input component and processes the command, writing any output to the telnet-output component."
   [components]
   (let [*telnet-input-components (atom (:telnet-input components))
         *telnet-output-components (atom (:telnet-output components))]
@@ -129,6 +136,7 @@
      :telnet-output @*telnet-output-components}))
 
 (defn write-telnet-outputs
+  "Takes output from the telnet-output component and writes it to the socket."
   [components]
   (let [*telnet-output-components (atom components)]
     (doseq [[entity {:keys [output out] :as telnet-output}] @*telnet-output-components]
