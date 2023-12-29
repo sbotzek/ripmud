@@ -116,8 +116,8 @@
     (let [start-time (System/currentTimeMillis)]
       (dorun (map #(run-system % pulse) @systems))
       (let [elapsed-time (- (System/currentTimeMillis) start-time)]
+        (println "Sleeping For" (- millis-per-pulse elapsed-time) "ms")
         (when (< elapsed-time millis-per-pulse)
-          (println "Sleeping for" (- millis-per-pulse elapsed-time) "ms")
           (Thread/sleep (- millis-per-pulse elapsed-time)))
         (recur game-state (inc pulse))))))
 
