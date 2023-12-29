@@ -47,22 +47,46 @@
     (when (zero? (mod pulse pulses))
       (let [start-time (System/currentTimeMillis)]
         (case f-arg
-          :type-to-entity-to-component
+          :entities->component
+          (let [entities->components (get @*components (first uses-components))
+                components' (f entities->components)
+                elapsed-time (- (System/currentTimeMillis) start-time)]
+            (when (not= (count updates-components) 0)
+              (dosync
+               (alter *components update (first updates-components) merge components'))))
+
+          :types->entities->component
           (let [entities (map first (filter (fn [[k v]] (every? v require-components)) @*entity-components))
                 components-examining (select-keys @*components uses-components)
                 components-and-entities-examining (into {} (map (fn [[k v]] [k (select-keys v entities)]) components-examining))
                 elapsed-time (- (System/currentTimeMillis) start-time)
                 components' (f components-and-entities-examining)]
             (dosync
-             (alter *components merge (select-keys components' updates-components))))
-
-          (throw (Exception. (str "Unknown f-arg: " f-arg))))
+             (alter *components merge (select-keys components' updates-components)))))
         (let [elapsed-time (- (System/currentTimeMillis) start-time)]
           (println "System" name "took" elapsed-time "ms"))))))
 
-  (defn run-game-server
-    [config]
-    (loop [game-state {}
+(defn validate-system
+  [{:keys [f-arg name uses-components] :as system}]
+  (case f-arg
+    :entities->component
+    (do
+      ;; only works for systems that require a single component
+      (when (not= 1 (count uses-components))
+        (throw (ex-info (str "f-arg " f-arg " requires exactly one uses components") {:system system})))
+      (when (> (count uses-components) 1)
+        (throw (ex-info (str "f-arg " f-arg " requires one or more updates components") {:system system}))))
+
+    :types->entities->component
+    nil
+
+    (throw (ex-info (str "unknown f-arg: " f-arg) {:system system}))))
+
+
+(defn run-game-server
+  [config]
+  (dorun (map validate-system @systems))
+  (loop [game-state {}
          pulse 1]
     #_(println "entities" @*entities)
     #_(println "entity-components" @*entity-components)
@@ -106,14 +130,14 @@
 
 (defn write-telnet-outputs
   [components]
-  (let [*telnet-output-components (atom (:telnet-output components))]
+  (let [*telnet-output-components (atom components)]
     (doseq [[entity {:keys [output out] :as telnet-output}] @*telnet-output-components]
       (when (seq output)
         (swap! *telnet-output-components assoc-in [entity :output] [])
         (doseq [line output]
           (.write out line))
         (.flush out)))
-    {:telnet-output @*telnet-output-components}))
+    @*telnet-output-components))
 
 (defn run-telnet-server
   [{:keys [port] :as config}]
@@ -138,21 +162,21 @@
   []
   (reset! systems
           [{:f slurp-telnet-inputs
-            :f-arg :type-to-entity-to-component
+            :f-arg :types->entities->component
             :name "slurp-telnet-inputs"
             :pulses 1
             :uses-components [:telnet-input]
             :require-components [:telnet-input]
             :updates-components [:telnet-input]}
            {:f process-telnet-inputs
-            :f-arg :type-to-entity-to-component
+            :f-arg :types->entities->component
             :name "process-telnet-inputs"
             :pulses 1
             :uses-components [:telnet-input :telnet-output]
             :require-components [:telnet-input :telnet-output]
             :updates-components [:telnet-input :telnet-output]}
            {:f write-telnet-outputs
-            :f-arg :type-to-entity-to-component
+            :f-arg :entities->component
             :name "write-telnet-outputs"
             :pulses 1
             :uses-components [:telnet-output]
