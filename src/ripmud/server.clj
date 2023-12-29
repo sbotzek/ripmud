@@ -170,6 +170,10 @@
         (.flush out)))
     @*telnet-output-components))
 
+(defn update-lifetimes
+  [components]
+  (update-vals components (fn [lifetime-tracker] (update lifetime-tracker :pulses inc))))
+
 (defn run-telnet-server
   [{:keys [port] :as config}]
   (let [server-socket (java.net.ServerSocket. port)]
@@ -192,7 +196,15 @@
 (defn -main
   []
   (reset! systems
-          [{:f slurp-telnet-inputs
+          [
+           {:f update-lifetimes
+            :f-arg :entities->component
+            :name "update-lifetimes"
+            :pulses 1
+            :uses-components [:lifetime-tracker]
+            :require-components [:lifetime-tracker]
+            :updates-components [:lifetime-tracker]}
+           {:f slurp-telnet-inputs
             :f-arg :types->entities->component
             :name "slurp-telnet-inputs"
             :pulses 1
@@ -212,7 +224,15 @@
             :pulses 1
             :uses-components [:telnet-output]
             :require-components [:telnet-output]
-            :updates-components [:telnet-output]}])
+            :updates-components [:telnet-output]}
+           ])
+  ;; uncomment for performance testing
+  #_(dotimes [n 100000]
+    (let [entity (new-entity!)]
+      (add-component! entity :lifetime-tracker {:pulses 0})
+      (add-component! entity :telnet-input {:input []})
+      (add-component! entity :telnet-output {:out nil :output []}))
+    )
   (let [config (edn/read-string (slurp (io/resource "server-config.edn")))
         telnet-thread (Thread/startVirtualThread
                        (fn telnet-handler[]
