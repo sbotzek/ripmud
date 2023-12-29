@@ -43,21 +43,26 @@
 
 (defn run-system
   [system pulse]
-  (let [{:keys [f name pulses uses-components require-components updates-components]} system]
+  (let [{:keys [f f-arg name pulses uses-components require-components updates-components]} system]
     (when (zero? (mod pulse pulses))
-      (let [start-time (System/currentTimeMillis)
-            entities (map first (filter (fn [[k v]] (every? v require-components)) @*entity-components))
-            components-examining (select-keys @*components uses-components)
-            components-and-entities-examining (into {} (map (fn [[k v]] [k (select-keys v entities)]) components-examining))
-            components' (f components-and-entities-examining)
-            elapsed-time (- (System/currentTimeMillis) start-time)]
-        (println "System" name "took" elapsed-time "ms, started with" components-and-entities-examining "returned" components')
-        (dosync
-         (alter *components merge (select-keys components' updates-components)))))))
+      (let [start-time (System/currentTimeMillis)]
+        (case f-arg
+          :type-to-entity-to-component
+          (let [entities (map first (filter (fn [[k v]] (every? v require-components)) @*entity-components))
+                components-examining (select-keys @*components uses-components)
+                components-and-entities-examining (into {} (map (fn [[k v]] [k (select-keys v entities)]) components-examining))
+                elapsed-time (- (System/currentTimeMillis) start-time)
+                components' (f components-and-entities-examining)]
+            (dosync
+             (alter *components merge (select-keys components' updates-components))))
 
-(defn run-game-server
-  [config]
-  (loop [game-state {}
+          (throw (Exception. (str "Unknown f-arg: " f-arg))))
+        (let [elapsed-time (- (System/currentTimeMillis) start-time)]
+          (println "System" name "took" elapsed-time "ms"))))))
+
+  (defn run-game-server
+    [config]
+    (loop [game-state {}
          pulse 1]
     #_(println "entities" @*entities)
     #_(println "entity-components" @*entity-components)
@@ -133,18 +138,21 @@
   []
   (reset! systems
           [{:f slurp-telnet-inputs
+            :f-arg :type-to-entity-to-component
             :name "slurp-telnet-inputs"
             :pulses 1
             :uses-components [:telnet-input]
             :require-components [:telnet-input]
             :updates-components [:telnet-input]}
            {:f process-telnet-inputs
+            :f-arg :type-to-entity-to-component
             :name "process-telnet-inputs"
             :pulses 1
             :uses-components [:telnet-input :telnet-output]
             :require-components [:telnet-input :telnet-output]
             :updates-components [:telnet-input :telnet-output]}
            {:f write-telnet-outputs
+            :f-arg :type-to-entity-to-component
             :name "write-telnet-outputs"
             :pulses 1
             :uses-components [:telnet-output]
