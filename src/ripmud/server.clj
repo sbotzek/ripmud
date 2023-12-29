@@ -155,10 +155,10 @@
 (defn write-telnet-outputs
   "Takes output from the telnet-output component and writes it to the socket."
   [components]
-  (let [*telnet-output-components (atom components)]
-    (doseq [[entity {:keys [output out] :as telnet-output}] @*telnet-output-components]
+  (let [*telnet-output-components (atom {})]
+    (doseq [[entity {:keys [output out] :as telnet-output}] components]
       (when (seq output)
-        (swap! *telnet-output-components assoc-in [entity :output] [])
+        (swap! *telnet-output-components assoc entity (assoc telnet-output :output []))
         (doseq [line output]
           (.write out line))
         (.flush out)))
