@@ -71,8 +71,12 @@
           :types->entities->component
           (let [select-start-time (System/currentTimeMillis)
                 entities (map first (filter (fn [[k v]] (every? v require-components)) @*entity-components))
-                components-examining (select-keys @*components uses-components)
-                components-and-entities-examining (into {} (map (fn [[k v]] [k (select-keys v entities)]) components-examining))
+                components-and-entities-examining (reduce (fn [sofar comp]
+                                                            (assoc sofar
+                                                                   comp
+                                                                   (select-keys (get @*components comp) entities)))
+                                                          {}
+                                                          uses-components)
                 _ (reset! *select-ms (- (System/currentTimeMillis) select-start-time))
                 run-f-start-time (System/currentTimeMillis)
                 components' (f components-and-entities-examining)
