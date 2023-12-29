@@ -39,7 +39,7 @@
    (alter *components update k dissoc entity)))
 
 
-(def systems (atom []))
+(def *systems (atom []))
 
 (defn run-system
   [system pulse]
@@ -111,14 +111,14 @@
 
 (defn run-game-server
   [config]
-  (dorun (map validate-system @systems))
+  (dorun (map validate-system @*systems))
   (loop [game-state {}
          pulse 1]
     #_(println "entities" @*entities)
     #_(println "entity-components" @*entity-components)
     #_(println "components" @*components)
     (let [start-time (System/currentTimeMillis)]
-      (dorun (map #(run-system % pulse) @systems))
+      (dorun (map #(run-system % pulse) @*systems))
       (let [elapsed-time (- (System/currentTimeMillis) start-time)]
         (println "Sleeping For" (- millis-per-pulse elapsed-time) "ms")
         (when (< elapsed-time millis-per-pulse)
@@ -195,7 +195,7 @@
 
 (defn -main
   []
-  (reset! systems
+  (reset! *systems
           [
            {:f update-lifetimes
             :f-arg :entities->component
