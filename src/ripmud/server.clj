@@ -45,31 +45,44 @@
   [system pulse]
   (let [{:keys [f f-arg name pulses uses-components require-components updates-components]} system]
     (when (zero? (mod pulse pulses))
-      (let [start-time (System/currentTimeMillis)]
+      (let [start-time (System/currentTimeMillis)
+            *select-ms (atom nil)
+            *run-f-ms (atom nil)
+            *update-ms (atom nil)]
         (case f-arg
           ;; system function takes argument of the form: {entity_1 {component}, entity_2 {component}, ....}
           :entities->component
-          (let [entities->components (get @*components (first uses-components))
+          (let [select-start-time (System/currentTimeMillis)
+                entities->components (get @*components (first uses-components))
+                _ (reset! *select-ms (- (System/currentTimeMillis) select-start-time))
+                run-f-start-time (System/currentTimeMillis)
                 components' (f entities->components)
-                elapsed-time (- (System/currentTimeMillis) start-time)]
+                _ (reset! *run-f-ms (- (System/currentTimeMillis) run-f-start-time))]
             (when (not= (count updates-components) 0)
-              (dosync
-               (alter *components update (first updates-components) merge components'))))
+              (let [update-start-time (System/currentTimeMillis)]
+                (dosync
+                 (alter *components update (first updates-components) merge components'))
+                (reset! *update-ms (- (System/currentTimeMillis) update-start-time)))))
 
           ;; system function takes argument of the form:
           ;; {component_type_1 {entity_1 {component}, entity_2 {component}, ...},
           ;;  component_type_2 {entity_1 {component}, entity_2 {component}, ...},
           ;;  ...}
           :types->entities->component
-          (let [entities (map first (filter (fn [[k v]] (every? v require-components)) @*entity-components))
+          (let [select-start-time (System/currentTimeMillis)
+                entities (map first (filter (fn [[k v]] (every? v require-components)) @*entity-components))
                 components-examining (select-keys @*components uses-components)
                 components-and-entities-examining (into {} (map (fn [[k v]] [k (select-keys v entities)]) components-examining))
-                elapsed-time (- (System/currentTimeMillis) start-time)
-                components' (f components-and-entities-examining)]
-            (dosync
-             (alter *components merge (select-keys components' updates-components)))))
-        (let [elapsed-time (- (System/currentTimeMillis) start-time)]
-          (println "System" name "took" elapsed-time "ms"))))))
+                _ (reset! *select-ms (- (System/currentTimeMillis) select-start-time))
+                run-f-start-time (System/currentTimeMillis)
+                components' (f components-and-entities-examining)
+                _ (reset! *run-f-ms (- (System/currentTimeMillis) run-f-start-time))]
+            (let [update-start-time (System/currentTimeMillis)]
+              (dosync
+               (alter *components merge (select-keys components' updates-components)))
+              (reset! *update-ms (- (System/currentTimeMillis) update-start-time)))))
+        (let [total-ms (- (System/currentTimeMillis) start-time)]
+          (println "System" name "total ms:" total-ms "select ms:" @*select-ms "run-f ms:" @*run-f-ms "update ms:" @*update-ms))))))
 
 (defn validate-system
   [{:keys [f-arg name uses-components] :as system}]
