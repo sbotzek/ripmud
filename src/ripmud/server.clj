@@ -43,7 +43,7 @@
 
 (defn run-system
   [system pulse]
-  (let [{:keys [f f-arg name pulses uses-components require-components updates-components]} system]
+  (let [{:keys [f f-arg name pulses uses-components updates-components]} system]
     (when (zero? (mod pulse pulses))
       (try
         (let [start-time (System/currentTimeMillis)
@@ -196,28 +196,24 @@
             :name "update-lifetimes"
             :pulses 1
             :uses-components [:lifetime-tracker]
-            :require-components [:lifetime-tracker]
             :updates-components [:lifetime-tracker]}
            {:f slurp-telnet-inputs
             :f-arg :types->entities->component
             :name "slurp-telnet-inputs"
             :pulses 1
             :uses-components [:telnet-input]
-            :require-components [:telnet-input]
             :updates-components [:telnet-input]}
            {:f process-telnet-inputs
             :f-arg :types->entities->component
             :name "process-telnet-inputs"
             :pulses 1
             :uses-components [:telnet-input :telnet-output]
-            :require-components [:telnet-input :telnet-output]
             :updates-components [:telnet-input :telnet-output]}
            {:f write-telnet-outputs
             :f-arg :entities->component
             :name "write-telnet-outputs"
             :pulses 1
             :uses-components [:telnet-output]
-            :require-components [:telnet-output]
             :updates-components [:telnet-output]}
            ])
   ;; uncomment for performance testing
