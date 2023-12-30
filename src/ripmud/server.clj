@@ -5,16 +5,16 @@
 
 (def millis-per-pulse 250)
 
-(def *next-entity-id (ref 0))
+(def *next-entity (ref 0))
 (def *entities (ref #{}))
 (def *components (ref {}))
 
 (defn new-entity!
   []
   (dosync
-   (let [entity-id (alter *next-entity-id inc)]
-     (alter *entities conj entity-id)
-     entity-id)))
+   (let [entity (alter *next-entity inc)]
+     (alter *entities conj entity)
+     entity)))
 
 (defn remove-entity!
   [entity]
@@ -118,9 +118,9 @@
   "Reads from the global telnet-inputs queue and puts those lines into the entity's telnet-input component."
   [components]
   (loop [components' {}]
-    (if-let [{:keys [entity-id line]} (.poll telnet-inputs)]
-      (let [telnet-input (get-in components' [:telnet-input entity-id])]
-        (recur (assoc-in components' [:telnet-input entity-id] (update telnet-input :input conj line))))
+    (if-let [{:keys [entity line]} (.poll telnet-inputs)]
+      (let [telnet-input (get-in components' [:telnet-input entity])]
+        (recur (assoc-in components' [:telnet-input entity] (update telnet-input :input conj line))))
       components')))
 
 (defn process-telnet-inputs
@@ -172,13 +172,13 @@
                              (fn client-handler[]
                                (let [in (io/reader client-socket)
                                      out (io/writer client-socket)
-                                     entity-id (new-entity!)]
-                                 (add-component! entity-id :telnet-input {:input []})
-                                 (add-component! entity-id :telnet-output {:out out :output []})
+                                     entity (new-entity!)]
+                                 (add-component! entity :telnet-input {:input []})
+                                 (add-component! entity :telnet-output {:out out :output []})
                                  (while true
                                    (let [line (.readLine in)]
                                      (println (str "Received: " line))
-                                     (.offer telnet-inputs {:entity-id entity-id :line line}))))))])))))
+                                     (.offer telnet-inputs {:entity entity :line line}))))))])))))
 
 (defn -main
   []
