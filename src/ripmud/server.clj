@@ -22,11 +22,6 @@
    (alter *entities disj entity)
    (alter *components update-vals #(dissoc % entity))))
 
-(defn add-component!
-  [entity k component]
-  (dosync
-   (alter *components assoc-in [k entity] component)))
-
 (defn remove-component!
   [entity k]
   (dosync
@@ -47,6 +42,11 @@
                           (let [handling-effects (filter #(get handle-effects (:type %)) effects)
                                 effects' (filter #(not (get handle-effects (:type %))) effects)]
                             (case f-arg
+                              :all-components
+                              (let [components' (reduce f @*components handling-effects)]
+                                (dosync
+                                 (ref-set *components components')))
+
                               ;; system function takes argument of the form: {entity_1 {component}, entity_2 {component}, ....}
                               :entities->component
                               (let [entities->components (get @*components (first uses-components))
@@ -98,8 +98,11 @@
       (throw (ex-info (str "Error running system " (:name system)) {:system system :exception e})))))
 
 (defn validate-system
-  [{:keys [f-arg name uses-components] :as system}]
+  [{:keys [f-arg type name uses-components] :as system}]
   (case f-arg
+    :all-components
+    (when (not= :effect-handler type)
+      (throw (ex-info (str "f-arg " f-arg " only usable on type :effect-handler") {:system system})))
     :entities->component
     (do
       ;; only works for systems that require a single component
@@ -135,6 +138,11 @@
         (when (< elapsed-time millis-per-pulse)
           (Thread/sleep (- millis-per-pulse elapsed-time)))
         (recur game-state')))))
+
+(defn handle-add-component
+  "Handles add component effect by adding the component to the entity"
+  [components {:keys [entity component data]}]
+  (assoc-in components [component entity] data))
 
 (defn handle-telnet-input
   "Takes telnet input effects and puts them into the correct entity's component."
@@ -193,8 +201,8 @@
                                (let [in (io/reader client-socket)
                                      out (io/writer client-socket)
                                      entity (new-entity!)]
-                                 (add-component! entity :telnet-input {:input []})
-                                 (add-component! entity :telnet-output {:out out :output []})
+                                 (.offer effect-queue {:type :add-component :entity entity :component :telnet-input :data {:input []}})
+                                 (.offer effect-queue {:type :add-component :entity entity :component :telnet-output :data {:out out :output []}})
                                  (while true
                                    (let [line (.readLine in)]
                                      (println (str "Received: " line))
@@ -204,6 +212,11 @@
   []
   (reset! *systems
           [
+           {:f handle-add-component
+            :f-arg :all-components
+            :type :effect-handler
+            :name "handle-add-component"
+            :handle-effects #{:add-component}}
            {:f update-lifetimes
             :f-arg :entities->component
             :type :periodic
@@ -236,10 +249,9 @@
   ;; uncomment for performance testing
   #_(dotimes [n 100000]
     (let [entity (new-entity!)]
-      (add-component! entity :lifetime-tracker {:pulses 0})
-      (add-component! entity :telnet-input {:input []})
-      (add-component! entity :telnet-output {:out nil :output []}))
-    )
+      (.offer effect-queue {:type :add-component :entity entity :component :lifetime-tracker :data {:pulses 0}})
+      (.offer effect-queue {:type :add-component :entity entity :component :telnet-input :data {:input []}})
+      (.offer effect-queue {:type :add-component :entity entity :component :telnet-output :data {:out nil :output []}})))
   (let [config (edn/read-string (slurp (io/resource "server-config.edn")))
         telnet-thread (Thread/startVirtualThread
                        (fn telnet-handler[]
