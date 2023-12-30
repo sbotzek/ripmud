@@ -116,7 +116,7 @@
   (loop [game-state {:pulse 0
                      :components {}
                      :effects []}]
-    #_(println "Main Loop Start: game-state" game-state)
+    #_(println "game-state" game-state)
     (let [start-time (System/currentTimeMillis)
           game-state' (update game-state :pulse inc)
           game-state' (update game-state' :effects slurp-effects)
