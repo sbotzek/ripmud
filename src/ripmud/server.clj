@@ -32,53 +32,70 @@
   (dosync
    (alter *components update k dissoc entity)))
 
+;;; Effects are for things that come about from outside a system, like input from a telnet socket.
+(def effect-queue (java.util.concurrent.ConcurrentLinkedQueue.))
 
 (def *systems (atom []))
 
 (defn run-system
-  [system pulse]
-  (let [{:keys [f f-arg name pulses uses-components updates-components]} system]
-    (when (zero? (mod pulse pulses))
-      (try
-        (let [start-time (System/currentTimeMillis)
-              *select-ms (atom nil)
-              *run-f-ms (atom nil)
-              *update-ms (atom nil)]
-          (case f-arg
-            ;; system function takes argument of the form: {entity_1 {component}, entity_2 {component}, ....}
-            :entities->component
-            (let [select-start-time (System/currentTimeMillis)
-                  entities->components (get @*components (first uses-components))
-                  _ (reset! *select-ms (- (System/currentTimeMillis) select-start-time))
-                  run-f-start-time (System/currentTimeMillis)
-                  components' (f entities->components)
-                  _ (reset! *run-f-ms (- (System/currentTimeMillis) run-f-start-time))]
-              (when (not= (count updates-components) 0)
-                (let [update-start-time (System/currentTimeMillis)]
-                  (dosync
-                   (alter *components assoc (first updates-components) components'))
-                  (reset! *update-ms (- (System/currentTimeMillis) update-start-time)))))
+  [{:keys [pulse effects] :as game-state} system]
+  (try
+    (let [start-time (System/currentTimeMillis)
+          game-state' (case (:type system)
+                        :effect-handler
+                        (let [{:keys [f f-arg handle-effects uses-components updates-components]} system]
+                          (let [handling-effects (filter #(get handle-effects (:type %)) effects)
+                                effects' (filter #(not (get handle-effects (:type %))) effects)]
+                            (case f-arg
+                              ;; system function takes argument of the form: {entity_1 {component}, entity_2 {component}, ....}
+                              :entities->component
+                              (let [entities->components (get @*components (first uses-components))
+                                    components' (reduce f entities->components handling-effects)]
+                                 (dosync
+                                  (alter *components assoc (first updates-components) components')))
 
-            ;; system function takes argument of the form:
-            ;; {component_type_1 {entity_1 {component}, entity_2 {component}, ...},
-            ;;  component_type_2 {entity_1 {component}, entity_2 {component}, ...},
-            ;;  ...}
-            :types->entities->component
-            (let [select-start-time (System/currentTimeMillis)
-                  types->entities->component (select-keys @*components uses-components)
-                  _ (reset! *select-ms (- (System/currentTimeMillis) select-start-time))
-                  run-f-start-time (System/currentTimeMillis)
-                  components' (f types->entities->component)
-                  _ (reset! *run-f-ms (- (System/currentTimeMillis) run-f-start-time))]
-              (let [update-start-time (System/currentTimeMillis)]
-                (dosync
-                 (doseq [comp updates-components]
-                   (alter *components update comp merge (get components' comp))))
-                (reset! *update-ms (- (System/currentTimeMillis) update-start-time)))))
-          (let [total-ms (- (System/currentTimeMillis) start-time)]
-            (println "System" name "total ms:" total-ms "select ms:" @*select-ms "run-f ms:" @*run-f-ms "update ms:" @*update-ms)))
-        (catch Exception e
-          (throw (ex-info (str "Error running system " name) {:system system :pulse pulse :exception e})))))))
+                              ;; system function takes argument of the form:
+                              ;; {component_type_1 {entity_1 {component}, entity_2 {component}, ...},
+                              ;;  component_type_2 {entity_1 {component}, entity_2 {component}, ...},
+                              ;;  ...}
+                              :types->entities->component
+                              (let [types->entities->component (select-keys @*components uses-components)
+                                    components' (reduce f types->entities->component handling-effects)]
+                                (dosync
+                                 (doseq [comp updates-components]
+                                   (alter *components update comp merge (get components' comp))))))
+                            (assoc game-state :effects effects')))
+                        :periodic
+                        (let [{:keys [f f-arg pulses uses-components updates-components]} system]
+                          (when (zero? (mod pulse pulses))
+                            (let [start-time (System/currentTimeMillis)
+                                  *select-ms (atom nil)
+                                  *run-f-ms (atom nil)
+                                  *update-ms (atom nil)]
+                              (case f-arg
+                                ;; system function takes argument of the form: {entity_1 {component}, entity_2 {component}, ....}
+                                :entities->component
+                                (let [entities->components (get @*components (first uses-components))
+                                      components' (f entities->components)]
+                                  (when (not= (count updates-components) 0)
+                                    (dosync
+                                     (alter *components assoc (first updates-components) components'))))
+
+                                ;; system function takes argument of the form:
+                                ;; {component_type_1 {entity_1 {component}, entity_2 {component}, ...},
+                                ;;  component_type_2 {entity_1 {component}, entity_2 {component}, ...},
+                                ;;  ...}
+                                :types->entities->component
+                                (let [types->entities->component (select-keys @*components uses-components)
+                                      components' (f types->entities->component)]
+                                  (dosync
+                                   (doseq [comp updates-components]
+                                     (alter *components update comp merge (get components' comp))))))))
+                          game-state))]
+      (println "System" (:name system) "total ms:" (- (System/currentTimeMillis) start-time))
+      game-state')
+    (catch Exception e
+      (throw (ex-info (str "Error running system " (:name system)) {:system system :exception e})))))
 
 (defn validate-system
   [{:keys [f-arg name uses-components] :as system}]
@@ -96,32 +113,35 @@
 
     (throw (ex-info (str "unknown f-arg: " f-arg) {:system system}))))
 
+(defn slurp-effects
+  [effects]
+  (if-let [effect (.poll effect-queue)]
+    (recur (conj effects effect))
+    effects))
 
 (defn run-game-server
   [config]
   (dorun (map validate-system @*systems))
-  (loop [game-state {}
-         pulse 1]
+  (loop [game-state {:pulse 0
+                     :effects []}]
     #_(println "entities" @*entities)
     #_(println "components" @*components)
-    (let [start-time (System/currentTimeMillis)]
-      (dorun (map #(run-system % pulse) @*systems))
+    (let [start-time (System/currentTimeMillis)
+          game-state' (update game-state :pulse inc)
+          game-state' (update game-state' :effects slurp-effects)
+          game-state' (reduce run-system game-state' @*systems)]
       (let [elapsed-time (- (System/currentTimeMillis) start-time)]
         (println "Sleeping For" (- millis-per-pulse elapsed-time) "ms")
         (when (< elapsed-time millis-per-pulse)
           (Thread/sleep (- millis-per-pulse elapsed-time)))
-        (recur game-state (inc pulse))))))
+        (recur game-state')))))
 
-(def telnet-inputs (java.util.concurrent.ConcurrentLinkedQueue.))
-
-(defn slurp-telnet-inputs
-  "Reads from the global telnet-inputs queue and puts those lines into the entity's telnet-input component."
-  [components]
-  (loop [components' {}]
-    (if-let [{:keys [entity line]} (.poll telnet-inputs)]
-      (let [telnet-input (get-in components' [:telnet-input entity])]
-        (recur (assoc-in components' [:telnet-input entity] (update telnet-input :input conj line))))
-      components')))
+(defn handle-telnet-input
+  "Takes telnet input effects and puts them into the correct entity's component."
+  [components effect]
+  (let [{:keys [entity line]} effect
+        telnet-input (get-in components [:telnet-input entity])]
+    (assoc-in components [:telnet-input entity] (update telnet-input :input conj line))))
 
 (defn process-telnet-inputs
   "Takes input from the telnet-input component and processes the command, writing any output to the telnet-output component."
@@ -178,7 +198,7 @@
                                  (while true
                                    (let [line (.readLine in)]
                                      (println (str "Received: " line))
-                                     (.offer telnet-inputs {:entity entity :line line}))))))])))))
+                                     (.offer effect-queue {:type :telnet-input :entity entity :line line}))))))])))))
 
 (defn -main
   []
@@ -186,24 +206,28 @@
           [
            {:f update-lifetimes
             :f-arg :entities->component
+            :type :periodic
             :name "update-lifetimes"
             :pulses 1
             :uses-components [:lifetime-tracker]
             :updates-components [:lifetime-tracker]}
-           {:f slurp-telnet-inputs
+           {:f handle-telnet-input
             :f-arg :types->entities->component
-            :name "slurp-telnet-inputs"
-            :pulses 1
+            :type :effect-handler
+            :name "handle-telnet-input"
+            :handle-effects #{:telnet-input}
             :uses-components [:telnet-input]
             :updates-components [:telnet-input]}
            {:f process-telnet-inputs
             :f-arg :types->entities->component
+            :type :periodic
             :name "process-telnet-inputs"
             :pulses 1
             :uses-components [:telnet-input :telnet-output]
             :updates-components [:telnet-input :telnet-output]}
            {:f write-telnet-outputs
             :f-arg :entities->component
+            :type :periodic
             :name "write-telnet-outputs"
             :pulses 1
             :uses-components [:telnet-output]
