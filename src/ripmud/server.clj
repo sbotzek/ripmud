@@ -21,6 +21,8 @@
 (def *systems (atom []))
 
 (defn run-system
+  "Runs a system."
+  ;; TODO: lots of duplication in here
   [{:keys [pulse effects components] :as game-state} system]
   (try
     (let [start-time (System/currentTimeMillis)
