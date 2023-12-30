@@ -7,7 +7,6 @@
 
 (def *next-entity (ref 0))
 (def *entities (ref #{}))
-(def *components (ref {}))
 
 (defn new-entity!
   []
@@ -16,24 +15,13 @@
      (alter *entities conj entity)
      entity)))
 
-(defn remove-entity!
-  [entity]
-  (dosync
-   (alter *entities disj entity)
-   (alter *components update-vals #(dissoc % entity))))
-
-(defn remove-component!
-  [entity k]
-  (dosync
-   (alter *components update k dissoc entity)))
-
 ;;; Effects are for things that come about from outside a system, like input from a telnet socket.
 (def effect-queue (java.util.concurrent.ConcurrentLinkedQueue.))
 
 (def *systems (atom []))
 
 (defn run-system
-  [{:keys [pulse effects] :as game-state} system]
+  [{:keys [pulse effects components] :as game-state} system]
   (try
     (let [start-time (System/currentTimeMillis)
           game-state' (case (:type system)
@@ -43,59 +31,57 @@
                                 effects' (filter #(not (get handle-effects (:type %))) effects)]
                             (case f-arg
                               :all-components
-                              (let [components' (reduce f @*components handling-effects)]
-                                (dosync
-                                 (ref-set *components components')))
+                              (let [components' (reduce f components handling-effects)]
+                                (assoc game-state
+                                       :effects effects'
+                                       :components components'))
 
                               ;; system function takes argument of the form: {entity_1 {component}, entity_2 {component}, ....}
                               :entities->component
-                              (let [entities->components (get @*components (first uses-components))
+                              (let [entities->components (get components (first uses-components))
                                     components' (reduce f entities->components handling-effects)]
-                                 (dosync
-                                  (alter *components assoc (first updates-components) components')))
+                                (assoc game-state
+                                       :effects effects'
+                                       :components (assoc components (first uses-components) components')))
 
                               ;; system function takes argument of the form:
                               ;; {component_type_1 {entity_1 {component}, entity_2 {component}, ...},
                               ;;  component_type_2 {entity_1 {component}, entity_2 {component}, ...},
                               ;;  ...}
                               :types->entities->component
-                              (let [types->entities->component (select-keys @*components uses-components)
+                              (let [types->entities->component (select-keys components uses-components)
                                     components' (reduce f types->entities->component handling-effects)]
-                                (dosync
-                                 (doseq [comp updates-components]
-                                   (alter *components update comp merge (get components' comp))))))
-                            (assoc game-state :effects effects')))
+                                (-> game-state
+                                    (assoc :effects effects')
+                                    (update :components #(merge % components')))))))
+
                         :periodic
                         (let [{:keys [f f-arg pulses uses-components updates-components]} system]
-                          (when (zero? (mod pulse pulses))
-                            (let [start-time (System/currentTimeMillis)
-                                  *select-ms (atom nil)
-                                  *run-f-ms (atom nil)
-                                  *update-ms (atom nil)]
-                              (case f-arg
-                                ;; system function takes argument of the form: {entity_1 {component}, entity_2 {component}, ....}
-                                :entities->component
-                                (let [entities->components (get @*components (first uses-components))
-                                      components' (f entities->components)]
-                                  (when (not= (count updates-components) 0)
-                                    (dosync
-                                     (alter *components assoc (first updates-components) components'))))
+                          (if (zero? (mod pulse pulses))
+                            (case f-arg
+                              ;; system function takes argument of the form: {entity_1 {component}, entity_2 {component}, ....}
+                              :entities->component
+                              (let [entities->components (get components (first uses-components))
+                                    components' (f entities->components)]
+                                (assoc game-state
+                                       :components (assoc components (first uses-components) components')))
 
-                                ;; system function takes argument of the form:
-                                ;; {component_type_1 {entity_1 {component}, entity_2 {component}, ...},
-                                ;;  component_type_2 {entity_1 {component}, entity_2 {component}, ...},
-                                ;;  ...}
-                                :types->entities->component
-                                (let [types->entities->component (select-keys @*components uses-components)
-                                      components' (f types->entities->component)]
-                                  (dosync
-                                   (doseq [comp updates-components]
-                                     (alter *components update comp merge (get components' comp))))))))
-                          game-state))]
+                              ;; system function takes argument of the form:
+                              ;; {component_type_1 {entity_1 {component}, entity_2 {component}, ...},
+                              ;;  component_type_2 {entity_1 {component}, entity_2 {component}, ...},
+                              ;;  ...}
+                              :types->entities->component
+                              (let [types->entities->component (select-keys components uses-components)
+                                    components' (f types->entities->component)]
+                                (-> game-state
+                                    (update :components #(merge % components')))))
+                            game-state)))]
       (println "System" (:name system) "total ms:" (- (System/currentTimeMillis) start-time))
+      #_(println "  System" (:name system) "game-state" game-state)
+      #_(println "  System" (:name system) "game-state'" game-state)
       game-state')
     (catch Exception e
-      (throw (ex-info (str "Error running system " (:name system)) {:system system :exception e})))))
+      (throw (ex-info (str "Error running system " (:name system)) {:system system :exception e :game-state game-state})))))
 
 (defn validate-system
   [{:keys [f-arg type name uses-components] :as system}]
@@ -126,9 +112,9 @@
   [config]
   (dorun (map validate-system @*systems))
   (loop [game-state {:pulse 0
+                     :components {}
                      :effects []}]
-    #_(println "entities" @*entities)
-    #_(println "components" @*components)
+    #_(println "Main Loop Start: game-state" game-state)
     (let [start-time (System/currentTimeMillis)
           game-state' (update game-state :pulse inc)
           game-state' (update game-state' :effects slurp-effects)
@@ -154,8 +140,8 @@
 (defn process-telnet-inputs
   "Takes input from the telnet-input component and processes the command, writing any output to the telnet-output component."
   [components]
-  (let [*telnet-input-components (atom {})
-        *telnet-output-components (atom {})]
+  (let [*telnet-input-components (atom (:telnet-input components))
+        *telnet-output-components (atom (:telnet-output components))]
     (doseq [[entity telnet-input] (:telnet-input components)]
       (let [telnet-output (get-in components [:telnet-output entity])]
         (when-let [[line & rest] (:input telnet-input)]
@@ -169,7 +155,7 @@
                            true
                            (str "You said: " line "\n"))]
               (swap! *telnet-output-components assoc entity (update telnet-output :output conj output))))
-          (swap! *telnet-input-components assoc entity (assoc telnet-input :input rest)))))
+          (swap! *telnet-input-components assoc-in [entity :input] rest))))
     {:telnet-input @*telnet-input-components
      :telnet-output @*telnet-output-components}))
 
