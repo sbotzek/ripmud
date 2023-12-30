@@ -62,9 +62,7 @@
               (when (not= (count updates-components) 0)
                 (let [update-start-time (System/currentTimeMillis)]
                   (dosync
-                   (alter *components assoc (first updates-components) components')
-                   ;; slightly different behavior here, but its much slower than the above when we update everything
-                   #_(alter *components update (first updates-components) merge components'))
+                   (alter *components assoc (first updates-components) components'))
                   (reset! *update-ms (- (System/currentTimeMillis) update-start-time)))))
 
             ;; system function takes argument of the form:
@@ -73,16 +71,10 @@
             ;;  ...}
             :types->entities->component
             (let [select-start-time (System/currentTimeMillis)
-                  entities (map first (filter (fn [[k v]] (every? v require-components)) @*entity-components))
-                  components-and-entities-examining (reduce (fn [sofar comp]
-                                                              (assoc sofar
-                                                                     comp
-                                                                     (select-keys (get @*components comp) entities)))
-                                                            {}
-                                                            uses-components)
+                  types->entities->component (select-keys @*components uses-components)
                   _ (reset! *select-ms (- (System/currentTimeMillis) select-start-time))
                   run-f-start-time (System/currentTimeMillis)
-                  components' (f components-and-entities-examining)
+                  components' (f types->entities->component)
                   _ (reset! *run-f-ms (- (System/currentTimeMillis) run-f-start-time))]
               (let [update-start-time (System/currentTimeMillis)]
                 (dosync
