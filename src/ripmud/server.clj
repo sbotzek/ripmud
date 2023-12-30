@@ -20,63 +20,69 @@
 
 (def *systems (atom []))
 
+
+(defn system-components-arg
+  "Returns the components args a system needs."
+  [{:keys [f-arg uses-components] :as system} components]
+  (case f-arg
+    ;; system function takes argument of the form: {entity_1 {component}, entity_2 {component}, ....}
+    :entities->component
+    (case uses-components
+      :all (throw (ex-info (str "f-arg " f-arg " cannot use :all uses-component") {:system system}))
+      (get components (first uses-components)))
+
+    ;; system function takes argument of the form:
+    ;; {component_type_1 {entity_1 {component}, entity_2 {component}, ...},
+    ;;  component_type_2 {entity_1 {component}, entity_2 {component}, ...},
+    ;;  ...}
+    :types->entities->component
+    (case uses-components
+      :all components
+      (select-keys components uses-components))
+
+    (throw (ex-info (str "unknown f-arg: " f-arg) {:system system}))))
+
+(defn system-update-components
+  "Updates the components from the results of calling a system ."
+  [{:keys [f-arg updates-components] :as system} components system-result]
+  (case f-arg
+    :entities->component
+    (case updates-components
+      :all (throw (ex-info (str "f-arg " f-arg " cannot use :all updates-component") {:system system}))
+      (assoc components (first updates-components) system-result))
+
+    :types->entities->component
+    (case updates-components
+      :all system-result
+      (merge components (select-keys system-result updates-components)))
+
+    (throw (ex-info (str "unknown f-arg: " f-arg) {:system system}))))
+
 (defn run-system
   "Runs a system."
-  ;; TODO: lots of duplication in here
   [{:keys [pulse effects components] :as game-state} system]
   (try
     (let [start-time (System/currentTimeMillis)
           game-state' (case (:type system)
                         :effect-handler
-                        (let [{:keys [f f-arg handle-effects uses-components updates-components]} system]
+                        (let [{:keys [f handle-effects]} system]
                           (let [handling-effects (filter #(get handle-effects (:type %)) effects)
-                                effects' (filter #(not (get handle-effects (:type %))) effects)]
-                            (case f-arg
-                              :all-components
-                              (let [components' (reduce f components handling-effects)]
-                                (assoc game-state
-                                       :effects effects'
-                                       :components components'))
-
-                              ;; system function takes argument of the form: {entity_1 {component}, entity_2 {component}, ....}
-                              :entities->component
-                              (let [entities->components (get components (first uses-components))
-                                    components' (reduce f entities->components handling-effects)]
-                                (assoc game-state
-                                       :effects effects'
-                                       :components (assoc components (first uses-components) components')))
-
-                              ;; system function takes argument of the form:
-                              ;; {component_type_1 {entity_1 {component}, entity_2 {component}, ...},
-                              ;;  component_type_2 {entity_1 {component}, entity_2 {component}, ...},
-                              ;;  ...}
-                              :types->entities->component
-                              (let [types->entities->component (select-keys components uses-components)
-                                    components' (reduce f types->entities->component handling-effects)]
-                                (-> game-state
-                                    (assoc :effects effects')
-                                    (update :components #(merge % components')))))))
+                                effects' (filter #(not (get handle-effects (:type %))) effects)
+                                components-arg (system-components-arg system components)
+                                system-result (reduce f components-arg handling-effects)
+                                components' (system-update-components system components system-result)]
+                            (assoc game-state
+                                   :effects effects'
+                                   :components components')))
 
                         :periodic
-                        (let [{:keys [f f-arg pulses uses-components updates-components]} system]
+                        (let [{:keys [f pulses]} system]
                           (if (zero? (mod pulse pulses))
-                            (case f-arg
-                              ;; system function takes argument of the form: {entity_1 {component}, entity_2 {component}, ....}
-                              :entities->component
-                              (let [entities->components (get components (first uses-components))
-                                    components' (f entities->components)]
-                                (assoc game-state
-                                       :components (assoc components (first uses-components) components')))
-
-                              ;; system function takes argument of the form:
-                              ;; {component_type_1 {entity_1 {component}, entity_2 {component}, ...},
-                              ;;  component_type_2 {entity_1 {component}, entity_2 {component}, ...},
-                              ;;  ...}
-                              :types->entities->component
-                              (let [types->entities->component (select-keys components uses-components)
-                                    components' (f types->entities->component)]
-                                (-> game-state
-                                    (update :components #(merge % components')))))
+                            (let [components-arg (system-components-arg system components)
+                                  system-result (f components-arg)
+                                  components' (system-update-components system components system-result)]
+                              (assoc game-state
+                                     :components components'))
                             game-state)))]
       (println "System" (:name system) "total ms:" (- (System/currentTimeMillis) start-time))
       #_(println "  System" (:name system) "game-state" game-state)
@@ -201,10 +207,12 @@
   (reset! *systems
           [
            {:f handle-add-component
-            :f-arg :all-components
+            :f-arg :types->entities->component
             :type :effect-handler
             :name "handle-add-component"
-            :handle-effects #{:add-component}}
+            :handle-effects #{:add-component}
+            :uses-components :all
+            :updates-components :all}
            {:f update-lifetimes
             :f-arg :entities->component
             :type :periodic
