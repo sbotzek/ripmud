@@ -7,7 +7,6 @@
 
 (def *next-entity-id (ref 0))
 (def *entities (ref #{}))
-(def *entity-components (ref {}))
 (def *components (ref {}))
 
 (defn new-entity!
@@ -15,27 +14,22 @@
   (dosync
    (let [entity-id (alter *next-entity-id inc)]
      (alter *entities conj entity-id)
-     (alter *entity-components assoc entity-id #{})
      entity-id)))
 
 (defn remove-entity!
   [entity]
   (dosync
    (alter *entities disj entity)
-   (doseq [component-key (get @*entity-components entity)]
-     (alter *components update component-key dissoc entity))
-   (alter *entity-components dissoc entity)))
+   (alter *components update-vals #(dissoc % entity))))
 
 (defn add-component!
   [entity k component]
   (dosync
-   (alter *entity-components update entity conj k)
    (alter *components assoc-in [k entity] component)))
 
 (defn remove-component!
   [entity k]
   (dosync
-   (alter *entity-components update entity disj k)
    (alter *components update k dissoc entity)))
 
 
@@ -109,7 +103,6 @@
   (loop [game-state {}
          pulse 1]
     #_(println "entities" @*entities)
-    #_(println "entity-components" @*entity-components)
     #_(println "components" @*components)
     (let [start-time (System/currentTimeMillis)]
       (dorun (map #(run-system % pulse) @*systems))
