@@ -145,25 +145,39 @@
         telnet-input (get-in components [:telnet-input entity])]
     (assoc-in components [:telnet-input entity] (update telnet-input :input conj line))))
 
+(defmulti telnet-input-handler
+  (fn [telnet-input telnet-output]
+    (:state telnet-input)))
+
+(defmethod telnet-input-handler :connected
+  [{:keys [input] :as telnet-input} telnet-output]
+  (if-let [line (first input)]
+    (let [[cmd & args] (str/split line #"\s+")
+          cmd (str/lower-case cmd)
+          output (cond
+                   (= "" cmd)
+                   ""
+
+                   (= "jimmie" cmd)
+                   "JIMMIEEEE! JIMMIE JIMMIE JIMMIESON!\n"
+
+                   true
+                   (str "You said: " line "\n"))]
+      [(assoc telnet-input :input (rest input))
+       (update telnet-output :output concat [output])])
+    [telnet-input telnet-output]))
+
 (defn process-telnet-inputs
   "Takes input from the telnet-input component and processes the command, writing any output to the telnet-output component."
   [components]
   (let [*telnet-input-components (atom (:telnet-input components))
         *telnet-output-components (atom (:telnet-output components))]
     (doseq [[entity telnet-input] (:telnet-input components)]
-      (let [telnet-output (get-in components [:telnet-output entity])]
-        (when-let [[line & rest] (:input telnet-input)]
-          (when (and line (not= "" line))
-            (let [[cmd & args] (str/split line #"\s+")
-                  cmd (str/lower-case cmd)
-                  output (cond
-                           (= "jimmie" cmd)
-                           "JIMMIEEEE! JIMMIE JIMMIE JIMMIESON!\n"
-
-                           true
-                           (str "You said: " line "\n"))]
-              (swap! *telnet-output-components assoc entity (update telnet-output :output conj output))))
-          (swap! *telnet-input-components assoc-in [entity :input] rest))))
+      (when (seq (:input telnet-input))
+        (let [telnet-output (get-in components [:telnet-output entity])]
+          (let [[telnet-input' telnet-output'] (telnet-input-handler telnet-input telnet-output)]
+            (swap! *telnet-input-components assoc entity telnet-input')
+            (swap! *telnet-output-components assoc entity telnet-output')))))
     {:telnet-input @*telnet-input-components
      :telnet-output @*telnet-output-components}))
 
@@ -195,7 +209,7 @@
                                (let [in (io/reader client-socket)
                                      out (io/writer client-socket)
                                      entity (new-entity!)]
-                                 (.offer effect-queue {:type :add-component :entity entity :component :telnet-input :data {:input []}})
+                                 (.offer effect-queue {:type :add-component :entity entity :component :telnet-input :data {:input [] :state :connected}})
                                  (.offer effect-queue {:type :add-component :entity entity :component :telnet-output :data {:out out :output []}})
                                  (while true
                                    (let [line (.readLine in)]
@@ -246,7 +260,7 @@
   #_(dotimes [n 100000]
     (let [entity (new-entity!)]
       (.offer effect-queue {:type :add-component :entity entity :component :lifetime-tracker :data {:pulses 0}})
-      (.offer effect-queue {:type :add-component :entity entity :component :telnet-input :data {:input []}})
+      (.offer effect-queue {:type :add-component :entity entity :component :telnet-input :data {:input [] :state :connected}})
       (.offer effect-queue {:type :add-component :entity entity :component :telnet-output :data {:out nil :output []}})))
   (let [config (edn/read-string (slurp (io/resource "server-config.edn")))
         telnet-thread (Thread/startVirtualThread
