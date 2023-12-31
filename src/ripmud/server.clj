@@ -138,6 +138,12 @@
   [components {:keys [entity component data]}]
   (assoc-in components [component entity] data))
 
+(defn handle-telnet-connection
+  [components {:keys [entity out]}]
+  (-> components
+      (assoc-in [:telnet-input entity] {:input [] :state :connected})
+      (assoc-in [:telnet-output entity] {:out out :output []})))
+
 (defn handle-telnet-input
   "Takes telnet input effects and puts them into the correct entity's component."
   [components effect]
@@ -209,8 +215,7 @@
                                (let [in (io/reader client-socket)
                                      out (io/writer client-socket)
                                      entity (new-entity!)]
-                                 (.offer effect-queue {:type :add-component :entity entity :component :telnet-input :data {:input [] :state :connected}})
-                                 (.offer effect-queue {:type :add-component :entity entity :component :telnet-output :data {:out out :output []}})
+                                 (.offer effect-queue {:type :telnet-connection :entity entity :out out})
                                  (while true
                                    (let [line (.readLine in)]
                                      (println (str "Received: " line))
@@ -227,6 +232,13 @@
             :handle-effects #{:add-component}
             :uses-components :all
             :updates-components :all}
+           {:f handle-telnet-connection
+            :f-arg :types->entities->component
+            :type :effect-handler
+            :name "handle-telnet-connection"
+            :handle-effects #{:telnet-connection}
+            :uses-components [:telnet-state :telnet-input :telnet-output]
+            :updates-components [:telnet-state :telnet-input :telnet-output]}
            {:f update-lifetimes
             :f-arg :entities->component
             :type :periodic
@@ -260,8 +272,7 @@
   #_(dotimes [n 100000]
     (let [entity (new-entity!)]
       (.offer effect-queue {:type :add-component :entity entity :component :lifetime-tracker :data {:pulses 0}})
-      (.offer effect-queue {:type :add-component :entity entity :component :telnet-input :data {:input [] :state :connected}})
-      (.offer effect-queue {:type :add-component :entity entity :component :telnet-output :data {:out nil :output []}})))
+      (.offer effect-queue {:type :telnet-connection :entity entity :out nil})))
   (let [config (edn/read-string (slurp (io/resource "server-config.edn")))
         telnet-thread (Thread/startVirtualThread
                        (fn telnet-handler[]
