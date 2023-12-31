@@ -142,7 +142,7 @@
   [components {:keys [entity out]}]
   (-> components
       (assoc-in [:telnet-input entity] {:input [] :state :connected})
-      (assoc-in [:telnet-output entity] {:out out :output []})))
+      (assoc-in [:telnet-output entity] {:out out :output ["Welcome to RIPMUD!\r\n"]})))
 
 (defn handle-telnet-input
   "Takes telnet input effects and puts them into the correct entity's component."
@@ -194,9 +194,10 @@
     (doseq [[entity {:keys [output out] :as telnet-output}] components]
       (when (seq output)
         (swap! *telnet-output-components assoc entity (assoc telnet-output :output []))
-        (doseq [line output]
-          (.write out line))
-        (.flush out)))
+        (when out
+          (doseq [line output]
+            (.write out line))
+          (.flush out))))
     @*telnet-output-components))
 
 (defn update-lifetimes
