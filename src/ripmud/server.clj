@@ -214,10 +214,10 @@
               telnet-state (get-in components [:telnet-state entity])]
           (let [[telnet-state' telnet-input' telnet-output'] (telnet-state-input telnet-state telnet-input telnet-output)
                 [telnet-state' telnet-input' telnet-output'] (if (= (type telnet-state) (type telnet-state'))
-                                                              ;; bust a prompt
-                                                              [telnet-state' telnet-input' (update telnet-output' :output concat [(telnet-state-prompt telnet-state')])]
-                                                              ;; call entered
-                                                              (telnet-state-entered telnet-state' telnet-input' telnet-output'))]
+                                                               ;; bust a prompt
+                                                               [telnet-state' telnet-input' (update telnet-output' :output concat ["\r\n" (telnet-state-prompt telnet-state')])]
+                                                               ;; call entered
+                                                               (telnet-state-entered telnet-state' telnet-input' telnet-output'))]
             (swap! *telnet-state-components assoc entity telnet-state')
             (swap! *telnet-input-components assoc entity telnet-input')
             (swap! *telnet-output-components assoc entity telnet-output')))))
