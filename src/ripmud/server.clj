@@ -151,7 +151,7 @@
   (telnet-state-input [state telnet-input telnet-output])
   (telnet-state-left [state telnet-input telnet-output]))
 
-(deftype TelnetStatePlaying [name]
+(defrecord TelnetStatePlaying [name]
   TelnetState
   (telnet-state-prompt [state] "What do you want to say? ")
   (telnet-state-entered [state telnet-input telnet-output]
