@@ -148,31 +148,38 @@
 (defprotocol TelnetState
   (telnet-state-prompt [state])
   (telnet-state-entered [state telnet-input telnet-output])
-  (telnet-state-input [state telnet-input telnet-output])
+  (telnet-state-input [state telnet-input telnet-output command-queue])
   (telnet-state-left [state telnet-input telnet-output]))
+
+(def command-table
+  [{:name "say" :args :arg-str :f (fn [components entity arg-str]
+                                    (update-in components [:telnet-output entity :output] concat [(str "You say: " arg-str "\r\n")]))}
+   {:name "jimmie" :args :none :f (fn [components entity arg-str]
+                                    (update-in components [:telnet-output entity :output] concat ["JIMMMIEEEE! JIMMIE JIMMIE JIMMIESON!\r\n"]))}
+
+   {:name "quit" :args :str-cmd :f (fn [components entity str-cmd]
+                                     (update-in components [:telnet-output entity :output] concat ["Quit not implemented, you're stuck here forever!\r\n"]))}])
 
 (defrecord TelnetStatePlaying [name]
   TelnetState
-  (telnet-state-prompt [state] "What do you want to say? ")
+  (telnet-state-prompt [state] "> ")
   (telnet-state-entered [state telnet-input telnet-output]
-    [state telnet-input (update telnet-output :output concat [(telnet-state-prompt state)])])
-  (telnet-state-input [state {:keys [input] :as telnet-input} telnet-output]
-    (if-let [line (first input)]
-      (let [[cmd & args] (str/split line #"\s+")
-            cmd (str/lower-case cmd)
-            output (cond
-                     (= "" cmd)
-                     ""
-
-                     (= "jimmie" cmd)
-                     "JIMMIEEEE! JIMMIE JIMMIE JIMMIESON!\n"
-
-                     true
-                     (str "You said: " line "\n"))]
-        [state
-         (assoc telnet-input :input (rest input))
-         (update telnet-output :output concat [output])])
-      [state telnet-input telnet-output]))
+    [state telnet-input (update telnet-output :output concat [(str "Welcome " name "!\r\n")])])
+  (telnet-state-input [state {:keys [input] :as telnet-input} telnet-output command-queue]
+    (loop [[line & input'] input
+           command-queue' command-queue]
+      (if line
+        (let [[str-cmd arg-str] (str/split line #"\s+" 2)
+              str-cmd (str/lower-case str-cmd)]
+          (if-let [cmd (first (filter #(str/starts-with? (:name %) str-cmd) command-table))]
+            (let [args (case (:args cmd)
+                         :none nil
+                         :arg-str arg-str
+                         :arg-list (str/split arg-str #"\s+")
+                         :str-cmd str-cmd)]
+              (recur input' (update command-queue' :commands concat [{:command cmd :args args}])))
+            (recur input' (update command-queue' :commands concat [{:command nil :str-cmd str-cmd}]))))
+        [state nil telnet-output command-queue'])))
   (telnet-state-left [state telnet-input telnet-output]))
 
 (deftype TelnetStateConnected []
@@ -181,7 +188,7 @@
     "What is your name? ")
   (telnet-state-entered [state telnet-input telnet-output]
     [state telnet-input (update telnet-output :output concat ["Welcome to RIPMUD!\r\n"])])
-  (telnet-state-input [state {:keys [input] :as telnet-input} telnet-output]
+  (telnet-state-input [state {:keys [input] :as telnet-input} telnet-output command-queue]
     (if-let [line (first input)]
       [(TelnetStatePlaying. line) (update telnet-input :input rest) telnet-output]
       [state telnet-input telnet-output]))
@@ -195,7 +202,6 @@
         telnet-output {:out out
                        :output []}
         [telnet-state telnet-input telnet-output] (telnet-state-entered telnet-state telnet-input telnet-output)
-        telnet-output (update telnet-output :output concat [(telnet-state-prompt telnet-state)])
         components' (-> components
                         (assoc-in [:telnet-state entity] telnet-state)
                         (assoc-in [:telnet-input entity] telnet-input)
@@ -205,38 +211,52 @@
 (defn process-telnet-inputs
   "Takes input from the telnet-input component and processes the command, writing any output to the telnet-output component."
   [components]
-  (let [*telnet-state-components (atom (:telnet-state components))
-        *telnet-input-components (atom (:telnet-input components))
-        *telnet-output-components (atom (:telnet-output components))]
+  (let [*components (atom components)]
     (doseq [[entity telnet-input] (:telnet-input components)]
       (when (seq (:input telnet-input))
         (let [telnet-output (get-in components [:telnet-output entity])
-              telnet-state (get-in components [:telnet-state entity])]
-          (let [[telnet-state' telnet-input' telnet-output'] (telnet-state-input telnet-state telnet-input telnet-output)
+              telnet-state (get-in components [:telnet-state entity])
+              command-queue (get-in components [:command-queue entity])]
+          (let [[telnet-state' telnet-input' telnet-output' command-queue'] (telnet-state-input telnet-state telnet-input telnet-output command-queue)
                 [telnet-state' telnet-input' telnet-output'] (if (= (type telnet-state) (type telnet-state'))
-                                                               ;; bust a prompt
-                                                               [telnet-state' telnet-input' (update telnet-output' :output concat ["\r\n" (telnet-state-prompt telnet-state')])]
+                                                               [telnet-state' telnet-input' telnet-output']
                                                                ;; call entered
                                                                (telnet-state-entered telnet-state' telnet-input' telnet-output'))]
-            (swap! *telnet-state-components assoc entity telnet-state')
-            (swap! *telnet-input-components assoc entity telnet-input')
-            (swap! *telnet-output-components assoc entity telnet-output')))))
-    {:telnet-state @*telnet-state-components
-     :telnet-input @*telnet-input-components
-     :telnet-output @*telnet-output-components}))
+            (swap! *components assoc-in [:telnet-state entity] telnet-state')
+            (swap! *components assoc-in [:telnet-input entity] telnet-input')
+            (swap! *components assoc-in [:telnet-output entity] telnet-output')
+            (swap! *components assoc-in [:command-queue entity] command-queue')))))
+    @*components))
+
+(defn process-command-queue
+  [components]
+  (let [*components (atom components)]
+    (doseq [[entity command-queue] (:command-queue components)]
+      (when (seq (:commands command-queue))
+        (let [[{:keys [command args str-cmd]} & commands'] (:commands command-queue)]
+          (if commands'
+            (swap! *components assoc-in [:command-queue entity] commands')
+            (swap! *components update :command-queue dissoc entity))
+          (if command
+            (let [command-f (:f command)]
+              (swap! *components command-f entity args))
+            (swap! *components update-in [:telnet-output entity :output] concat [(str "Unknown command: " str-cmd "\r\n")])))))
+    @*components))
 
 (defn write-telnet-outputs
   "Takes output from the telnet-output component and writes it to the socket."
   [components]
-  (let [*telnet-output-components (atom components)]
-    (doseq [[entity {:keys [output out] :as telnet-output}] components]
+  (let [*components (atom components)]
+    (doseq [[entity {:keys [output out] :as telnet-output}] (:telnet-output components)]
       (when (seq output)
-        (swap! *telnet-output-components assoc entity (assoc telnet-output :output []))
+        (swap! *components assoc-in [:telnet-output entity :output] [])
         (when out
           (doseq [line output]
             (.write out line))
+          (.write out "\r\n")
+          (.write out (telnet-state-prompt (get-in components [:telnet-state entity])))
           (.flush out))))
-    @*telnet-output-components))
+    @*components))
 
 (defn update-lifetimes
   [components]
@@ -297,14 +317,21 @@
             :type :periodic
             :name "process-telnet-inputs"
             :pulses 1
-            :uses-components [:telnet-state :telnet-input :telnet-output]
-            :updates-components [:telnet-state :telnet-input :telnet-output]}
+            :uses-components [:telnet-state :telnet-input :telnet-output :command-queue]
+            :updates-components [:telnet-state :telnet-input :telnet-output :command-queue]}
+           {:f process-command-queue
+            :f-arg :types->entities->component
+            :type :periodic
+            :name "process-command-queue"
+            :pulses 1
+            :uses-components :all
+            :updates-components :all}
            {:f write-telnet-outputs
-            :f-arg :entities->component
+            :f-arg :types->entities->component
             :type :periodic
             :name "write-telnet-outputs"
             :pulses 1
-            :uses-components [:telnet-output]
+            :uses-components [:telnet-output :telnet-state]
             :updates-components [:telnet-output]}
            ])
   ;; uncomment for performance testing
