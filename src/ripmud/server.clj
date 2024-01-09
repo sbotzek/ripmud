@@ -145,6 +145,12 @@
         telnet-input (get-in components [:telnet-input entity])]
     (assoc-in components [:telnet-input entity] (update telnet-input :input conj line))))
 
+(def player-component-type :telnet-state)
+(defn player?
+  "Returns true if the entity is a player."
+  [entity components]
+  (not (nil? (get-in components [player-component-type entity]))))
+
 (defprotocol TelnetState
   (telnet-state-prompt [state])
   (telnet-state-entered [state telnet-input telnet-output])
@@ -152,13 +158,41 @@
   (telnet-state-left [state telnet-input telnet-output]))
 
 (def command-table
-  [{:name "say" :args :arg-str :f (fn [components entity arg-str]
-                                    (update-in components [:telnet-output entity :output] concat [(str "You say: " arg-str "\r\n")]))}
-   {:name "jimmie" :args :none :f (fn [components entity arg-str]
-                                    (update-in components [:telnet-output entity :output] concat ["JIMMMIEEEE! JIMMIE JIMMIE JIMMIESON!\r\n"]))}
+  [{:name "say"
+    :restrictions []
+    :args :arg-str
+    :f (fn [components entity arg-str]
+         (update-in components [:perceptor entity :perceptions] concat [{:act :say :actor entity :message arg-str}]))}
+   {:name "jimmie"
+    :restrictions [:player]
+    :args :none
+    :f (fn [components entity arg-str]
+         (update-in components [:telnet-output entity :output] concat ["JIMMMIEEEE! JIMMIE JIMMIE JIMMIESON!\r\n"]))}
 
-   {:name "quit" :args :str-cmd :f (fn [components entity str-cmd]
-                                     (update-in components [:telnet-output entity :output] concat ["Quit not implemented, you're stuck here forever!\r\n"]))}])
+   {:name "components"
+    :restrictions [:player]
+    :args :none
+    :f (fn [components entity arg-str]
+         (let [output (reduce (fn [components-str [component-key components]]
+                   (if-let [component (get components entity)]
+                     (str components-str component-key ": " (get components entity) "\r\n")
+                     components-str))
+                 ""
+                 components)]
+            (update-in components [:telnet-output entity :output] concat [output])))}
+   {:name "quit"
+    :restrictions [:player]
+    :args :str-cmd
+    :f (fn [components entity str-cmd]
+         (update-in components [:telnet-output entity :output] concat ["Quit not implemented, you're stuck here forever!\r\n"]))}])
+
+(defn can-use-cmd?
+  [cmd entity components]
+  (every? (fn [restriction]
+            (case restriction
+              :player (player? entity components)
+              (throw (ex-info (str "Unknown restriction: " restriction) {:restriction restriction}))))
+          (:restrictions cmd)))
 
 (defrecord TelnetStatePlaying [name]
   TelnetState
@@ -237,10 +271,28 @@
           (if commands'
             (swap! *components assoc-in [:command-queue entity] commands')
             (swap! *components update :command-queue dissoc entity))
-          (if command
+          (if (and command (can-use-cmd? command entity @*components))
             (let [command-f (:f command)]
               (swap! *components command-f entity args))
             (swap! *components update-in [:telnet-output entity :output] concat [(str "Unknown command: " str-cmd "\r\n")])))))
+    @*components))
+
+(defn process-player-perceptions
+  "Takes perceptions from the perceptor component and writes them to the telnet-output component."
+  [components]
+  (let [*components (atom components)]
+    (doseq [entity (keys (player-component-type components))]
+      (let [perceptions (get-in components [:perceptor entity :perceptions])]
+        (when (seq perceptions)
+          (swap! *components assoc-in [:perceptor entity :perceptions] [])
+          (let [telnet-output (get-in components [:telnet-output entity])]
+            (doseq [{:keys [act actor] :as action} perceptions]
+              (case act
+                :say
+                (if (= actor entity)
+                  (swap! *components update-in [:telnet-output entity :output] concat [(str "You say \"" (:message action) "\"\r\n")])
+                  (swap! *components update-in [:telnet-output entity :output] concat [(str actor " says \"" (:message action) "\"\r\n")]))
+                (throw (ex-info (str "Unknown act: " act) {:act act}))))))))
     @*components))
 
 (defn write-telnet-outputs
@@ -326,6 +378,13 @@
             :pulses 1
             :uses-components :all
             :updates-components :all}
+           {:f process-player-perceptions
+            :f-arg :types->entities->component
+            :type :periodic
+            :name "process-player-perceptions"
+            :pulses 1
+            :uses-components [:perceptor :telnet-state :telnet-output]
+            :updates-components [:perceptor :telnet-output]}
            {:f write-telnet-outputs
             :f-arg :types->entities->component
             :type :periodic
