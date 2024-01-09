@@ -171,11 +171,14 @@
 
    {:name "components"
     :restrictions [:player]
-    :args :none
+    :args :arg-list
     :f (fn [components entity arg-str]
-         (let [output (reduce (fn [components-str [component-key components]]
-                   (if-let [component (get components entity)]
-                     (str components-str component-key ": " (get components entity) "\r\n")
+         (let [target (if (seq arg-str)
+                        (parse-long (first arg-str))
+                        entity)
+               output (reduce (fn [components-str [component-key components]]
+                   (if-let [component (get components target)]
+                     (str components-str component-key ": " (get components target) "\r\n")
                      components-str))
                  ""
                  components)]
@@ -209,7 +212,7 @@
             (let [args (case (:args cmd)
                          :none nil
                          :arg-str arg-str
-                         :arg-list (str/split arg-str #"\s+")
+                         :arg-list (if (nil? arg-str) '() (str/split arg-str #"\s+"))
                          :str-cmd str-cmd)]
               (recur input' (update command-queue' :commands concat [{:command cmd :args args}])))
             (recur input' (update command-queue' :commands concat [{:command nil :str-cmd str-cmd}]))))
