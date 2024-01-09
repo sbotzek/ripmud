@@ -145,11 +145,10 @@
         telnet-input (get-in components [:telnet-input entity])]
     (assoc-in components [:telnet-input entity] (update telnet-input :input conj line))))
 
-(def player-component-type :telnet-state)
 (defn player?
   "Returns true if the entity is a player."
   [entity components]
-  (not (nil? (get-in components [player-component-type entity]))))
+  (not (nil? (get-in components [:player entity]))))
 
 (defprotocol TelnetState
   (telnet-state-prompt [state])
@@ -239,10 +238,11 @@
         telnet-output {:out out
                        :output []}
         [telnet-state telnet-input telnet-output] (telnet-state-entered telnet-state telnet-input telnet-output)
-        components' (-> components
-                        (assoc-in [:telnet-state entity] telnet-state)
-                        (assoc-in [:telnet-input entity] telnet-input)
-                        (assoc-in [:telnet-output entity] telnet-output))]
+        components' (cond-> components
+                      out (assoc-in [:player entity] {})
+                      true (assoc-in [:telnet-state entity] telnet-state)
+                      true (assoc-in [:telnet-input entity] telnet-input)
+                      true (assoc-in [:telnet-output entity] telnet-output))]
     components'))
 
 (defn process-telnet-inputs
@@ -284,7 +284,7 @@
   "Takes perceptions from the perceptor component and writes them to the telnet-output component."
   [components]
   (let [*components (atom components)]
-    (doseq [entity (keys (player-component-type components))]
+    (doseq [entity (keys (:player components))]
       (let [perceptions (get-in components [:perceptor entity :perceptions])]
         (when (seq perceptions)
           (swap! *components assoc-in [:perceptor entity :perceptions] [])
@@ -351,8 +351,8 @@
             :type :effect-handler
             :name "handle-telnet-connection"
             :handle-effects #{:telnet-connection}
-            :uses-components [:telnet-state :telnet-input :telnet-output]
-            :updates-components [:telnet-state :telnet-input :telnet-output]}
+            :uses-components [:telnet-state :telnet-input :telnet-output :player]
+            :updates-components [:telnet-state :telnet-input :telnet-output :player]}
            {:f update-lifetimes
             :f-arg :entities->component
             :type :periodic
@@ -386,7 +386,7 @@
             :type :periodic
             :name "process-player-perceptions"
             :pulses 1
-            :uses-components [:perceptor :telnet-state :telnet-output]
+            :uses-components [:player :perceptor :telnet-state :telnet-output]
             :updates-components [:perceptor :telnet-output]}
            {:f write-telnet-outputs
             :f-arg :types->entities->component
