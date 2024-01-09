@@ -162,6 +162,14 @@
     :args :arg-str
     :f (fn [components entity arg-str]
          (update-in components [:perceptor entity :perceptions] concat [{:act :say :actor entity :message arg-str}]))}
+   {:name "shout"
+    :restrictions []
+    :args :arg-str
+    :f (fn [components entity arg-str]
+         (reduce (fn [components entity]
+                   (update-in components [:perceptor entity :perceptions] conj {:act :shout :actor entity :message arg-str}))
+                 components
+                 @*entities))}
    {:name "jimmie"
     :restrictions [:player]
     :args :none
