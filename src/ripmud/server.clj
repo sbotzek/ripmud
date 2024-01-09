@@ -160,41 +160,41 @@
   [{:name "say"
     :restrictions []
     :args :arg-str
-    :f (fn [components entity arg-str]
-         (update-in components [:perceptor entity :perceptions] concat [{:act :say :actor entity :message arg-str}]))}
+    :f (fn [components actor arg-str]
+         (update-in components [:perceptor actor :perceptions] concat [{:act :say :actor actor :message arg-str}]))}
    {:name "shout"
     :restrictions []
     :args :arg-str
-    :f (fn [components entity arg-str]
-         (reduce (fn [components entity]
-                   (update-in components [:perceptor entity :perceptions] conj {:act :shout :actor entity :message arg-str}))
+    :f (fn [components actor arg-str]
+         (reduce (fn [components target]
+                   (update-in components [:perceptor target :perceptions] conj {:act :shout :actor actor :message arg-str}))
                  components
                  @*entities))}
    {:name "jimmie"
     :restrictions [:player]
     :args :none
-    :f (fn [components entity arg-str]
-         (update-in components [:telnet-output entity :output] concat ["JIMMMIEEEE! JIMMIE JIMMIE JIMMIESON!\r\n"]))}
+    :f (fn [components actor arg-str]
+         (update-in components [:telnet-output actor :output] concat ["JIMMMIEEEE! JIMMIE JIMMIE JIMMIESON!\r\n"]))}
 
    {:name "components"
     :restrictions [:player]
     :args :arg-list
-    :f (fn [components entity arg-str]
+    :f (fn [components actor arg-str]
          (let [target (if (seq arg-str)
                         (parse-long (first arg-str))
-                        entity)
+                        actor)
                output (reduce (fn [components-str [component-key components]]
                    (if-let [component (get components target)]
                      (str components-str component-key ": " (get components target) "\r\n")
                      components-str))
                  ""
                  components)]
-            (update-in components [:telnet-output entity :output] concat [output])))}
+            (update-in components [:telnet-output actor :output] concat [output])))}
    {:name "quit"
     :restrictions [:player]
     :args :str-cmd
-    :f (fn [components entity str-cmd]
-         (update-in components [:telnet-output entity :output] concat ["Quit not implemented, you're stuck here forever!\r\n"]))}])
+    :f (fn [components actor str-cmd]
+         (update-in components [:telnet-output actor :output] concat ["Quit not implemented, you're stuck here forever!\r\n"]))}])
 
 (defn can-use-cmd?
   [cmd entity components]
