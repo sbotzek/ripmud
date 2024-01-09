@@ -313,18 +313,16 @@
 (defn process-npc-perceptions
   "Takes perceptions from the perceptor component and writes them to the telnet-output component."
   [components]
-  (let [*components (atom components)]
-    (doseq [entity (keys (:perceptor components))]
-      (when (not (player? entity components))
-        (let [perceptions (get-in components [:perceptor entity :perceptions])]
-          (when (seq perceptions)
-            (swap! *components update :perceptor dissoc entity)
-            (doseq [{:keys [act actor] :as action} perceptions]
+  (let [*perceptors (transient {})]
+    (doseq [[entity perceptor] (:perceptor components)]
+      (if (player? entity components)
+        (assoc! *perceptors entity perceptor)
+        (when-let [perceptions (:perceptions perceptor)]
+          (doseq [{:keys [act actor] :as action} perceptions]
               (case act
                 true
-                #_(println "NPC" entity "perceived" act "from" actor)))))))
-    @*components))
-
+                #_(println "NPC" entity "perceived" act "from" actor))))))
+    (assoc components :perceptor (persistent! *perceptors))))
 
 (defn write-telnet-outputs
   "Takes output from the telnet-output component and writes it to the socket."
