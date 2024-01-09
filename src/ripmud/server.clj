@@ -303,8 +303,28 @@
                 (if (= actor entity)
                   (swap! *components update-in [:telnet-output entity :output] concat [(str "You say \"" (:message action) "\"\r\n")])
                   (swap! *components update-in [:telnet-output entity :output] concat [(str actor " says \"" (:message action) "\"\r\n")]))
+                :shout
+                (if (= actor entity)
+                  (swap! *components update-in [:telnet-output entity :output] concat [(str "You shout \"" (:message action) "\"\r\n")])
+                  (swap! *components update-in [:telnet-output entity :output] concat [(str actor " shouts \"" (:message action) "\"\r\n")]))
                 (throw (ex-info (str "Unknown act: " act) {:act act}))))))))
     @*components))
+
+(defn process-npc-perceptions
+  "Takes perceptions from the perceptor component and writes them to the telnet-output component."
+  [components]
+  (let [*components (atom components)]
+    (doseq [entity (keys (:perceptor components))]
+      (when (not (player? entity components))
+        (let [perceptions (get-in components [:perceptor entity :perceptions])]
+          (when (seq perceptions)
+            (swap! *components update :perceptor dissoc entity)
+            (doseq [{:keys [act actor] :as action} perceptions]
+              (case act
+                true
+                #_(println "NPC" entity "perceived" act "from" actor)))))))
+    @*components))
+
 
 (defn write-telnet-outputs
   "Takes output from the telnet-output component and writes it to the socket."
@@ -396,6 +416,13 @@
             :pulses 1
             :uses-components [:player :perceptor :telnet-state :telnet-output]
             :updates-components [:perceptor :telnet-output]}
+           {:f process-npc-perceptions
+            :f-arg :types->entities->component
+            :type :periodic
+            :name "process-npc-perceptions"
+            :pulses 1
+            :uses-components [:perceptor :player :command-queue]
+            :updates-components [:perceptor :command-queue]}
            {:f write-telnet-outputs
             :f-arg :types->entities->component
             :type :periodic
