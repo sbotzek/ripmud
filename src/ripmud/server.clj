@@ -1,8 +1,10 @@
 (ns ripmud.server
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.pprint :refer [pprint]]
             [clojure.string :as str]
-            [clojure.set :as set]))
+            [clojure.set :as set]
+            [ripmud.job :as job]))
 
 (def millis-per-pulse 250)
 
@@ -19,81 +21,6 @@
 ;;; Effects are for things that come about from outside a system, like input from a telnet socket.
 (def effect-queue (java.util.concurrent.ConcurrentLinkedQueue.))
 
-(defn system-f-arg
-  "Returns the args a system's function needs."
-  [{:keys [uses] :as system} game-state]
-  ;; TODO: calculating the 'shape' could be a 1 time thing
-  (loop [arg-shape (reduce (fn [sofar arg]
-                       (assoc-in sofar arg {}))
-                     {}
-                     uses)
-        arg (reduce (fn [sofar arg]
-                       (assoc-in sofar arg (get-in game-state arg)))
-                     {}
-                     uses)]
-    (if (= 1 (count arg-shape))
-      (recur (first (vals arg-shape))
-             (first (vals arg)))
-      arg)))
-
-(defn system-update-game-state
-  "Updates the game state from the results of calling a system."
-  [{:keys [updates] :as system} game-state system-result]
-  ;; TODO: calculating the 'shape' could be a 1 time thing
-  (loop [result-shape (reduce (fn [sofar arg]
-                                (assoc-in sofar arg {}))
-                              {}
-                              updates)
-         result-path []]
-    (if (= 1 (count result-shape))
-      (recur
-       (first (vals result-shape))
-       (conj result-path (first (keys result-shape))))
-      (let [result (if (seq result-path)
-                     (assoc-in {} result-path system-result)
-                     system-result)]
-        (reduce (fn [sofar arg]
-                  (assoc-in sofar arg (get-in result arg)))
-                game-state
-                updates)))))
-
-(defn run-system
-  "Runs a system."
-  [{:keys [pulse effects components] :as game-state} system]
-  (try
-    #_(println "System" (:name system) "game-state" game-state)
-    (let [start-time (System/currentTimeMillis)
-          game-state' (case (:type system)
-                        :effect-handler
-                        (let [{:keys [f handle-effects]} system]
-                          (let [handling-effects (filter #(get handle-effects (:type %)) effects)
-                                effects' (filter #(not (get handle-effects (:type %))) effects)
-                                arg (system-f-arg system game-state)
-                                system-result (reduce f arg handling-effects)
-                                game-state' (system-update-game-state system game-state system-result)]
-                            (assoc game-state' :effects effects')))
-
-                        :periodic
-                        (let [{:keys [f pulses]} system]
-                          (if (zero? (mod pulse pulses))
-                            (let [arg (system-f-arg system game-state)
-                                  system-result (f arg)]
-                              (system-update-game-state system game-state system-result))
-                            game-state)))]
-      (println "System" (:name system) "total ms:" (- (System/currentTimeMillis) start-time))
-      #_(println "  System" (:name system) "game-state'" game-state')
-      game-state')
-    (catch Exception e
-      (throw (ex-info (str "Error running system " (:name system)) {:system system :exception e :game-state game-state})))))
-
-
-(defn validate-system
-  [{:keys [uses updates type name uses-components] :as system}]
-  (cond
-    (and (not (= uses updates))
-         (not (set/subset? updates uses)))
-    (throw (ex-info (str "System " name " 'updates' is not a subset of 'uses'.") {:system system}))))
-
 (defn slurp-effects
   [effects]
   (if-let [effect (.poll effect-queue)]
@@ -102,18 +29,21 @@
 
 (defn run-game-server
   [config systems]
-  (dorun (map validate-system systems))
-  (loop [game-state {:pulse 0
-                     :components {}
-                     :effects []}]
-    #_(println "game-state" game-state)
-    (let [start-time (System/currentTimeMillis)
-          game-state' (reduce run-system game-state systems)]
-      (let [elapsed-time (- (System/currentTimeMillis) start-time)]
-        (println "Sleeping For" (- millis-per-pulse elapsed-time) "ms")
-        (when (< elapsed-time millis-per-pulse)
-          (Thread/sleep (- millis-per-pulse elapsed-time)))
-        (recur game-state')))))
+  (dorun (map job/validate systems))
+  (let [execution-plan (job/jobs->execution-plan systems)]
+    #_(pprint execution-plan)
+    (loop [game-state {:pulse 0
+                       :components {}
+                       :effects []}]
+      #_(pprint game-state)
+      #_(println "game-state" game-state)
+      (let [start-time (System/currentTimeMillis)]
+        (let [game-state' (job/execute-step execution-plan game-state)]
+          (let [elapsed-time (- (System/currentTimeMillis) start-time)]
+            (println "Sleeping For" (- millis-per-pulse elapsed-time) "ms")
+            (when (< elapsed-time millis-per-pulse)
+              (Thread/sleep (- millis-per-pulse elapsed-time)))
+            (recur game-state')))))))
 
 (defn handle-add-component
   "Handles add component effect by adding the component to the entity"
@@ -345,30 +275,51 @@
                                      (println (str "Received: " line))
                                      (.offer effect-queue {:type :telnet-input :entity entity :line line}))))))])))))
 
+(defrecord EffectHandlerJobRunner [handle-effects]
+  job/JobRunner
+  (run [{:keys [handle-effects] :as this}
+        effects
+        {:keys [f] :as job}
+        job-arg]
+    (let [handling-effects (filter #(get handle-effects (:type %)) effects)
+          effects' (filter #(not (get handle-effects (:type %))) effects)
+          job-result (reduce f job-arg handling-effects)]
+      [job-result effects']))
+  (uses [this]
+    #{[:effects]})
+  (updates [this]
+    #{[:effects]}))
+
+(defrecord PeriodicJobRunner [pulses]
+  job/JobRunner
+  (run [this pulse
+        {:keys [f] :as job} job-arg]
+    (if (zero? (mod pulse (:pulses this)))
+      [(f job-arg)]
+      [job-arg]))
+  (uses [this]
+    #{[:pulse]})
+  (updates [this]
+    #{}))
+
 (def systems
   [
    {:f inc
     :name "increment-pulse"
-    :type :periodic
-    :pulses 1
     :uses #{[:pulse]}
     :updates #{[:pulse]}}
    {:f slurp-effects
     :name "slurp-effects"
-    :type :periodic
-    :pulses 1
     :uses #{[:effects]}
     :updates #{[:effects]}}
    {:f handle-add-component
     :name "handle-add-component"
-    :type :effect-handler
-    :handle-effects #{:add-component}
+    :runner (EffectHandlerJobRunner. #{:add-component})
     :uses #{[:components]}
     :updates #{[:components]}}
    {:f handle-telnet-connection
     :name "handle-telnet-connection"
-    :type :effect-handler
-    :handle-effects #{:telnet-connection}
+    :runner (EffectHandlerJobRunner. #{:telnet-connection})
     :uses #{[:components :telnet-state]
             [:components :telnet-input]
             [:components :telnet-output]
@@ -379,20 +330,15 @@
                [:components :player]}}
    {:f update-lifetimes
     :name "update-lifetimes"
-    :type :periodic
-    :pulses 1
     :uses #{[:components :lifetime-tracker]}
     :updates #{[:components :lifetime-tracker]}}
    {:f handle-telnet-input
     :name "handle-telnet-input"
-    :type :effect-handler
-    :handle-effects #{:telnet-input}
+    :runner (EffectHandlerJobRunner. #{:telnet-input})
     :uses #{[:components :telnet-input]}
     :updates #{[:components :telnet-input]}}
    {:f process-telnet-inputs
     :name "process-telnet-inputs"
-    :type :periodic
-    :pulses 1
     :uses #{[:components :telnet-state]
             [:components :telnet-input]
             [:components :telnet-output]
@@ -403,14 +349,10 @@
                [:components :command-queue]}}
    {:f process-command-queue
     :name "process-command-queue"
-    :type :periodic
-    :pulses 1
     :uses #{[:components]}
     :updates #{[:components]}}
    {:f process-player-perceptions
     :name "process-player-perceptions"
-    :type :periodic
-    :pulses 1
     :uses #{[:components :player]
             [:components :perceptor]
             [:components :telnet-state]
@@ -419,8 +361,6 @@
                [:components :telnet-output]}}
    {:f process-npc-perceptions
     :name "process-npc-perceptions"
-    :type :periodic
-    :pulses 1
     :uses #{[:components :perceptor]
             [:components :player]
             [:components :command-queue]}
@@ -428,8 +368,6 @@
                [:components :command-queue]}}
    {:f write-telnet-outputs
     :name "write-telnet-outputs"
-    :type :periodic
-    :pulses 1
     :uses #{[:components :telnet-output]
             [:components :telnet-state]}
     :updates #{[:components :telnet-output]}}
