@@ -18,9 +18,6 @@
 ;;; Effects are for things that come about from outside a system, like input from a telnet socket.
 (def effect-queue (java.util.concurrent.ConcurrentLinkedQueue.))
 
-(def *systems (atom []))
-
-
 (defn system-components-arg
   "Returns the components args a system needs."
   [{:keys [f-arg uses-components] :as system} components]
@@ -117,8 +114,8 @@
     effects))
 
 (defn run-game-server
-  [config]
-  (dorun (map validate-system @*systems))
+  [config systems]
+  (dorun (map validate-system systems))
   (loop [game-state {:pulse 0
                      :components {}
                      :effects []}]
@@ -126,7 +123,7 @@
     (let [start-time (System/currentTimeMillis)
           game-state' (update game-state :pulse inc)
           game-state' (update game-state' :effects slurp-effects)
-          game-state' (reduce run-system game-state' @*systems)]
+          game-state' (reduce run-system game-state' systems)]
       (let [elapsed-time (- (System/currentTimeMillis) start-time)]
         (println "Sleeping For" (- millis-per-pulse elapsed-time) "ms")
         (when (< elapsed-time millis-per-pulse)
@@ -361,74 +358,75 @@
                                      (println (str "Received: " line))
                                      (.offer effect-queue {:type :telnet-input :entity entity :line line}))))))])))))
 
+(def systems
+  [
+   {:f handle-add-component
+    :f-arg :types->entities->component
+    :type :effect-handler
+    :name "handle-add-component"
+    :handle-effects #{:add-component}
+    :uses-components :all
+    :updates-components :all}
+   {:f handle-telnet-connection
+    :f-arg :types->entities->component
+    :type :effect-handler
+    :name "handle-telnet-connection"
+    :handle-effects #{:telnet-connection}
+    :uses-components [:telnet-state :telnet-input :telnet-output :player]
+    :updates-components [:telnet-state :telnet-input :telnet-output :player]}
+   {:f update-lifetimes
+    :f-arg :entities->component
+    :type :periodic
+    :name "update-lifetimes"
+    :pulses 1
+    :uses-components [:lifetime-tracker]
+    :updates-components [:lifetime-tracker]}
+   {:f handle-telnet-input
+    :f-arg :types->entities->component
+    :type :effect-handler
+    :name "handle-telnet-input"
+    :handle-effects #{:telnet-input}
+    :uses-components [:telnet-input]
+    :updates-components [:telnet-input]}
+   {:f process-telnet-inputs
+    :f-arg :types->entities->component
+    :type :periodic
+    :name "process-telnet-inputs"
+    :pulses 1
+    :uses-components [:telnet-state :telnet-input :telnet-output :command-queue]
+    :updates-components [:telnet-state :telnet-input :telnet-output :command-queue]}
+   {:f process-command-queue
+    :f-arg :types->entities->component
+    :type :periodic
+    :name "process-command-queue"
+    :pulses 1
+    :uses-components :all
+    :updates-components :all}
+   {:f process-player-perceptions
+    :f-arg :types->entities->component
+    :type :periodic
+    :name "process-player-perceptions"
+    :pulses 1
+    :uses-components [:player :perceptor :telnet-state :telnet-output]
+    :updates-components [:perceptor :telnet-output]}
+   {:f process-npc-perceptions
+    :f-arg :types->entities->component
+    :type :periodic
+    :name "process-npc-perceptions"
+    :pulses 1
+    :uses-components [:perceptor :player :command-queue]
+    :updates-components [:perceptor :command-queue]}
+   {:f write-telnet-outputs
+    :f-arg :types->entities->component
+    :type :periodic
+    :name "write-telnet-outputs"
+    :pulses 1
+    :uses-components [:telnet-output :telnet-state]
+    :updates-components [:telnet-output]}
+   ])
+
 (defn -main
   []
-  (reset! *systems
-          [
-           {:f handle-add-component
-            :f-arg :types->entities->component
-            :type :effect-handler
-            :name "handle-add-component"
-            :handle-effects #{:add-component}
-            :uses-components :all
-            :updates-components :all}
-           {:f handle-telnet-connection
-            :f-arg :types->entities->component
-            :type :effect-handler
-            :name "handle-telnet-connection"
-            :handle-effects #{:telnet-connection}
-            :uses-components [:telnet-state :telnet-input :telnet-output :player]
-            :updates-components [:telnet-state :telnet-input :telnet-output :player]}
-           {:f update-lifetimes
-            :f-arg :entities->component
-            :type :periodic
-            :name "update-lifetimes"
-            :pulses 1
-            :uses-components [:lifetime-tracker]
-            :updates-components [:lifetime-tracker]}
-           {:f handle-telnet-input
-            :f-arg :types->entities->component
-            :type :effect-handler
-            :name "handle-telnet-input"
-            :handle-effects #{:telnet-input}
-            :uses-components [:telnet-input]
-            :updates-components [:telnet-input]}
-           {:f process-telnet-inputs
-            :f-arg :types->entities->component
-            :type :periodic
-            :name "process-telnet-inputs"
-            :pulses 1
-            :uses-components [:telnet-state :telnet-input :telnet-output :command-queue]
-            :updates-components [:telnet-state :telnet-input :telnet-output :command-queue]}
-           {:f process-command-queue
-            :f-arg :types->entities->component
-            :type :periodic
-            :name "process-command-queue"
-            :pulses 1
-            :uses-components :all
-            :updates-components :all}
-           {:f process-player-perceptions
-            :f-arg :types->entities->component
-            :type :periodic
-            :name "process-player-perceptions"
-            :pulses 1
-            :uses-components [:player :perceptor :telnet-state :telnet-output]
-            :updates-components [:perceptor :telnet-output]}
-           {:f process-npc-perceptions
-            :f-arg :types->entities->component
-            :type :periodic
-            :name "process-npc-perceptions"
-            :pulses 1
-            :uses-components [:perceptor :player :command-queue]
-            :updates-components [:perceptor :command-queue]}
-           {:f write-telnet-outputs
-            :f-arg :types->entities->component
-            :type :periodic
-            :name "write-telnet-outputs"
-            :pulses 1
-            :uses-components [:telnet-output :telnet-state]
-            :updates-components [:telnet-output]}
-           ])
   ;; uncomment for performance testing
   #_(dotimes [n 100000]
     (let [entity (new-entity!)]
@@ -440,5 +438,5 @@
                          (run-telnet-server config)))
         game-thread (Thread/startVirtualThread
                      (fn game-handler[]
-                       (run-game-server config)))]
+                       (run-game-server config systems)))]
     (.join game-thread)))
