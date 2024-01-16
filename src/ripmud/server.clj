@@ -360,14 +360,14 @@
     :uses #{[:effects]}
     :updates #{[:effects]}}
    {:f handle-add-component
-    :type :effect-handler
     :name "handle-add-component"
+    :type :effect-handler
     :handle-effects #{:add-component}
     :uses #{[:components]}
     :updates #{[:components]}}
    {:f handle-telnet-connection
-    :type :effect-handler
     :name "handle-telnet-connection"
+    :type :effect-handler
     :handle-effects #{:telnet-connection}
     :uses #{[:components :telnet-state]
             [:components :telnet-input]
@@ -378,20 +378,20 @@
                [:components :telnet-output]
                [:components :player]}}
    {:f update-lifetimes
-    :type :periodic
     :name "update-lifetimes"
+    :type :periodic
     :pulses 1
     :uses #{[:components :lifetime-tracker]}
     :updates #{[:components :lifetime-tracker]}}
    {:f handle-telnet-input
-    :type :effect-handler
     :name "handle-telnet-input"
+    :type :effect-handler
     :handle-effects #{:telnet-input}
     :uses #{[:components :telnet-input]}
     :updates #{[:components :telnet-input]}}
    {:f process-telnet-inputs
-    :type :periodic
     :name "process-telnet-inputs"
+    :type :periodic
     :pulses 1
     :uses #{[:components :telnet-state]
             [:components :telnet-input]
@@ -402,14 +402,14 @@
                [:components :telnet-output]
                [:components :command-queue]}}
    {:f process-command-queue
-    :type :periodic
     :name "process-command-queue"
+    :type :periodic
     :pulses 1
     :uses #{[:components]}
     :updates #{[:components]}}
    {:f process-player-perceptions
-    :type :periodic
     :name "process-player-perceptions"
+    :type :periodic
     :pulses 1
     :uses #{[:components :player]
             [:components :perceptor]
@@ -418,8 +418,8 @@
     :updates #{[:components :perceptor]
                [:components :telnet-output]}}
    {:f process-npc-perceptions
-    :type :periodic
     :name "process-npc-perceptions"
+    :type :periodic
     :pulses 1
     :uses #{[:components :perceptor]
             [:components :player]
@@ -427,8 +427,8 @@
     :updates #{[:components :perceptor]
                [:components :command-queue]}}
    {:f write-telnet-outputs
-    :type :periodic
     :name "write-telnet-outputs"
+    :type :periodic
     :pulses 1
     :uses #{[:components :telnet-output]
             [:components :telnet-state]}
