@@ -100,6 +100,10 @@
     (recur (conj effects effect))
     effects))
 
+(defn increment-pulse
+  [pulse]
+  (inc pulse))
+
 (defn run-game-server
   [config systems]
   (dorun (map validate-system systems))
@@ -108,9 +112,7 @@
                      :effects []}]
     #_(println "game-state" game-state)
     (let [start-time (System/currentTimeMillis)
-          game-state' (update game-state :pulse inc)
-          game-state' (update game-state' :effects slurp-effects)
-          game-state' (reduce run-system game-state' systems)]
+          game-state' (reduce run-system game-state systems)]
       (let [elapsed-time (- (System/currentTimeMillis) start-time)]
         (println "Sleeping For" (- millis-per-pulse elapsed-time) "ms")
         (when (< elapsed-time millis-per-pulse)
@@ -349,6 +351,18 @@
 
 (def systems
   [
+   {:f increment-pulse
+    :name "increment-pulse"
+    :type :periodic
+    :pulses 1
+    :uses #{[:pulse]}
+    :updates #{[:pulse]}}
+   {:f slurp-effects
+    :name "slurp-effects"
+    :type :periodic
+    :pulses 1
+    :uses #{[:effects]}
+    :updates #{[:effects]}}
    {:f handle-add-component
     :type :effect-handler
     :name "handle-add-component"
