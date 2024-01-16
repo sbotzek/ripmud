@@ -100,10 +100,6 @@
     (recur (conj effects effect))
     effects))
 
-(defn increment-pulse
-  [pulse]
-  (inc pulse))
-
 (defn run-game-server
   [config systems]
   (dorun (map validate-system systems))
@@ -351,7 +347,7 @@
 
 (def systems
   [
-   {:f increment-pulse
+   {:f inc
     :name "increment-pulse"
     :type :periodic
     :pulses 1
