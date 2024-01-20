@@ -1,4 +1,4 @@
-# RipMUD
+# RIPMUD
 
 Start the server with:
 
