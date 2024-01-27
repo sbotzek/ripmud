@@ -3,30 +3,30 @@
             [clojure.test :refer [are deftest is testing]]))
 
 (def complex-test-jobs
-  [{:name :a
+  [{:id :a
     :uses #{[:a]}
     :updates #{[:a]}}
-   {:name :b
+   {:id :b
     :uses #{[:a] [:b]}
     :updates #{[:b]}}
-   {:name :c
+   {:id :c
     :uses #{[:c]}
     :updates #{[:c]}}
-   {:name :d
+   {:id :d
     :uses #{[:c] [:d]}
     :updates #{[:d]}}
-   {:name :e
+   {:id :e
     :uses #{[:e]}
     :updates #{[:e]}}
-   {:name :b+d
+   {:id :b+d
     :uses #{[:b] [:c] [:d]}
     :updates #{[:b] [:c] [:d]}}
-   {:name :a+b+e :uses #{[:a] [:b] [:e]}
+   {:id :a+b+e :uses #{[:a] [:b] [:e]}
     :updates #{[:a] [:e]}}
-   {:name :c2
+   {:id :c2
     :uses #{[:c]}
     :updates #{[:c]}}
-   {:name :b+c+e
+   {:id :b+c+e
     :uses #{[:b] [:c] [:e]}
     :updates #{[:e]}}])
 
@@ -76,29 +76,29 @@
 
 (deftest test-validate
   (testing "Job validates when 'uses' same as 'updates'."
-    (is (not (job/validate {:name :test
+    (is (not (job/validate {:id :test
                             :uses #{:a :b :c}
                             :updates #{:a :b :c}}))))
   (testing "Job validates when 'uses' superset of 'updates'."
-    (is (not (job/validate {:name :test
+    (is (not (job/validate {:id :test
                             :uses #{:a :b :c :d}
                             :updates #{:a :b :c}}))))
   (testing "Job doesn't validate when 'uses' is not a superset of 'updates'."
-    (is (thrown? Exception (job/validate {:name :test
+    (is (thrown? Exception (job/validate {:id :test
                                           :uses #{:a :b :c}
                                           :updates #{:a :c :d}}))))
   (testing "Runner validates when 'uses' same as 'updates'."
-    (is (not (job/validate {:name :test
+    (is (not (job/validate {:id :test
                             :uses #{}
                             :updates #{}
                             :runner (TestJobRunner. inc #{:a :b :c} #{:a :b :c})}))))
   (testing "Runner validates when 'uses' superset of 'updates'."
-    (is (not (job/validate {:name :test
+    (is (not (job/validate {:id :test
                             :uses #{}
                             :updates #{}
                             :runner (TestJobRunner. inc #{:a :b :c :d} #{:a :b :c})}))))
   (testing "Runner doesn't validate when 'uses' is not a superset of 'updates'."
-    (is (thrown? Exception (job/validate {:name :test
+    (is (thrown? Exception (job/validate {:id :test
                                           :uses #{}
                                           :updates #{}
                                           :runner (TestJobRunner. inc #{:a :b :c} #{:a :b :d})})))))
@@ -192,23 +192,23 @@
   (testing "Simple dependency"
     (is (= {:a #{}
             :b #{:a}}
-           (job/jobs->dependency-graph [{:name :a
+           (job/jobs->dependency-graph [{:id :a
                                          :uses #{[:a]}
                                          :updates #{[:a]}}
-                                        {:name :b
+                                        {:id :b
                                          :uses #{[:a]}
                                          :updates #{}}]))))
   (testing "Multiple dependencies"
     (is (= {:a #{}
             :b #{}
             :c #{:a :b}}
-           (job/jobs->dependency-graph [{:name :a
+           (job/jobs->dependency-graph [{:id :a
                                          :uses #{[:a]}
                                          :updates #{[:a]}}
-                                        {:name :b
+                                        {:id :b
                                          :uses #{[:b]}
                                          :updates #{[:b]}}
-                                        {:name :c
+                                        {:id :c
                                          :uses #{[:a] [:b]}
                                          :updates #{[:a] [:b]}}]))))
   (testing "Dependencies of dependencies are removed."
@@ -216,16 +216,16 @@
             :b #{:a}
             :c #{:b}
             :d #{:c}}
-           (job/jobs->dependency-graph [{:name :a
+           (job/jobs->dependency-graph [{:id :a
                                          :uses #{[:a]}
                                          :updates #{[:a]}}
-                                        {:name :b
+                                        {:id :b
                                          :uses #{[:a] [:b]}
                                          :updates #{[:b]}}
-                                        {:name :c
+                                        {:id :c
                                          :uses #{[:a] [:b] [:c]}
                                          :updates #{[:c]}}
-                                        {:name :d
+                                        {:id :d
                                          :uses #{[:a] [:c]}
                                          :updates #{}}]))))
   (testing "Complex example"
@@ -244,79 +244,79 @@
   (testing "single key"
     (is (= {:a 1 :b 2 :c 4}
            (job/run-job {:a 1 :b 2 :c 3}
-                        {:name :test :uses #{[:c]} :updates #{[:c]} :f inc}))))
+                        {:id :test :uses #{[:c]} :updates #{[:c]} :f inc}))))
   (testing "multiple key"
     (is (= {:a 1 :b 3 :c 4}
            (job/run-job {:a 1 :b 2 :c 3}
-                        {:name :test :uses #{[:b] [:c]} :updates #{[:b] [:c]}
+                        {:id :test :uses #{[:b] [:c]} :updates #{[:b] [:c]}
                          :f (fn [m] (update-vals m inc))}))))
   (testing "updating runner"
     (is (= {:a 10 :b 3 :c 4}
            (job/run-job {:a 1 :b 2 :c 3}
-                        {:name :test :uses #{[:b] [:c]} :updates #{[:b] [:c]}
+                        {:id :test :uses #{[:b] [:c]} :updates #{[:b] [:c]}
                          :runner (TestJobRunner. #(* 10 %) #{[:a]} #{[:a]})
                          :f (fn [m] (update-vals m inc))}))))
   (testing "multi-key runner update"
     (is (= {:a 10 :b 3 :c 4 :d 40}
            (job/run-job {:a 1 :b 2 :c 3 :d 4}
-                        {:name :test :uses #{[:b] [:c]} :updates #{[:b] [:c]}
+                        {:id :test :uses #{[:b] [:c]} :updates #{[:b] [:c]}
                          :runner (TestJobRunner. #(update-vals % (fn [v] (* v 10))) #{[:a] [:d]} #{[:a] [:d]})
                          :f (fn [m] (update-vals m inc))})))))
 
 (deftest test-execute-step
   (testing "Shallow pipeline"
-    (let [jobs [{:name :j1 :uses #{[:a]} :updates #{[:a]} :f inc}
-                {:name :j2 :uses #{[:a]} :updates #{[:a]} :f inc}]
+    (let [jobs [{:id :j1 :uses #{[:a]} :updates #{[:a]} :f inc}
+                {:id :j2 :uses #{[:a]} :updates #{[:a]} :f inc}]
           plan (job/jobs->execution-plan jobs)]
       (is (= {:a 3}
              (job/execute-step plan {:a 1})))))
   (testing "Independend jobs"
-    (let [jobs [{:name :j1 :uses #{[:a]} :updates #{[:a]} :f inc}
-                {:name :j2 :uses #{[:b]} :updates #{[:b]} :f (partial * 10)}
-                {:name :j3 :uses #{[:c]} :updates #{[:c]} :f (partial * 3)}]
+    (let [jobs [{:id :j1 :uses #{[:a]} :updates #{[:a]} :f inc}
+                {:id :j2 :uses #{[:b]} :updates #{[:b]} :f (partial * 10)}
+                {:id :j3 :uses #{[:c]} :updates #{[:c]} :f (partial * 3)}]
           plan (job/jobs->execution-plan jobs)]
       (is (= {:a 2 :b 20 :c 9}
              (job/execute-step plan {:a 1 :b 2 :c 3})))))
   (testing "Deep pipeline"
-    (let [jobs [{:name :j1 :uses #{[:a]} :updates #{[:a]} :f inc}
-                {:name :j2 :uses #{[:a] [:b]} :updates #{[:a] [:b]} :f #(update-vals % inc)}
-                {:name :j3 :uses #{[:c]} :updates #{[:c]} :f inc}
-                {:name :j4 :uses #{[:c] [:d]} :updates #{[:c] [:d]} :f #(update-vals % inc)}
-                {:name :j5 :uses #{[:c] [:a]} :updates #{[:c] [:a]} :f #(update-vals % inc)}]
+    (let [jobs [{:id :j1 :uses #{[:a]} :updates #{[:a]} :f inc}
+                {:id :j2 :uses #{[:a] [:b]} :updates #{[:a] [:b]} :f #(update-vals % inc)}
+                {:id :j3 :uses #{[:c]} :updates #{[:c]} :f inc}
+                {:id :j4 :uses #{[:c] [:d]} :updates #{[:c] [:d]} :f #(update-vals % inc)}
+                {:id :j5 :uses #{[:c] [:a]} :updates #{[:c] [:a]} :f #(update-vals % inc)}]
           plan (job/jobs->execution-plan jobs)]
       (is (= {:a 4 :b 3 :c 6 :d 5}
              (job/execute-step plan {:a 1 :b 2 :c 3 :d 4})))))
   (testing "Fan-in pipeline"
-    (let [jobs [{:name :j1 :uses #{[:a]} :updates #{[:a]} :f inc}
-                {:name :j2 :uses #{[:b]} :updates #{[:b]} :f inc}
-                {:name :j3 :uses #{[:c]} :updates #{[:c]} :f inc}
-                {:name :j4 :uses #{[:a] [:b] [:c]} :updates #{[:a] [:b] [:c]} :f #(update-vals % (partial * 10))}]
+    (let [jobs [{:id :j1 :uses #{[:a]} :updates #{[:a]} :f inc}
+                {:id :j2 :uses #{[:b]} :updates #{[:b]} :f inc}
+                {:id :j3 :uses #{[:c]} :updates #{[:c]} :f inc}
+                {:id :j4 :uses #{[:a] [:b] [:c]} :updates #{[:a] [:b] [:c]} :f #(update-vals % (partial * 10))}]
           plan (job/jobs->execution-plan jobs)]
       (is (= {:a 20 :b 30 :c 40}
              (job/execute-step plan {:a 1 :b 2 :c 3})))))
   (testing "Common root"
-    (let [jobs [{:name :j1 :uses #{[:a]} :updates #{[:a]} :f inc}
-                {:name :j2 :uses #{[:b]} :updates #{[:b]} :f inc}
-                {:name :j3 :uses #{[:a] [:b]} :updates #{[:a] [:b]} :f #(update-vals % (partial * 10))}
-                {:name :j4 :uses #{[:a]} :updates #{[:a]} :f inc}
-                {:name :j5 :uses #{[:b]} :updates #{[:b]} :f inc}]
+    (let [jobs [{:id :j1 :uses #{[:a]} :updates #{[:a]} :f inc}
+                {:id :j2 :uses #{[:b]} :updates #{[:b]} :f inc}
+                {:id :j3 :uses #{[:a] [:b]} :updates #{[:a] [:b]} :f #(update-vals % (partial * 10))}
+                {:id :j4 :uses #{[:a]} :updates #{[:a]} :f inc}
+                {:id :j5 :uses #{[:b]} :updates #{[:b]} :f inc}]
           plan (job/jobs->execution-plan jobs)]
       (is (= {:a 21 :b 31 :c 3}
              (job/execute-step plan {:a 1 :b 2 :c 3})))))
   (testing "Multiple common roots"
-    (let [jobs [{:name :j1 :uses #{[:a] [:c]} :updates #{[:a] [:c]} :f #(update-vals % (partial * 3))}
-                {:name :j2 :uses #{[:b] [:d]} :updates #{[:b] [:d]} :f #(update-vals % (partial * 5))}
-                {:name :j3 :uses #{[:c] [:d]} :updates #{[:c] [:d]} :f #(update-vals % (partial * 7))}
-                {:name :j4 :uses #{[:a] [:b]} :updates #{[:a] [:b]} :f #(update-vals % (partial * 11))}]
+    (let [jobs [{:id :j1 :uses #{[:a] [:c]} :updates #{[:a] [:c]} :f #(update-vals % (partial * 3))}
+                {:id :j2 :uses #{[:b] [:d]} :updates #{[:b] [:d]} :f #(update-vals % (partial * 5))}
+                {:id :j3 :uses #{[:c] [:d]} :updates #{[:c] [:d]} :f #(update-vals % (partial * 7))}
+                {:id :j4 :uses #{[:a] [:b]} :updates #{[:a] [:b]} :f #(update-vals % (partial * 11))}]
           plan (job/jobs->execution-plan jobs)]
       (is (= {:a 33 :b 110 :c 63 :d 140}
              (job/execute-step plan {:a 1 :b 2 :c 3 :d 4}))))
-    (let [jobs [{:name :j1 :uses #{[:a] [:c]} :updates #{[:a] [:c]} :f #(update-vals % (partial * 3))}
-                {:name :j2 :uses #{[:b] [:d]} :updates #{[:b] [:d]} :f #(update-vals % (partial * 5))}
-                {:name :j3 :uses #{[:c] [:d]} :updates #{[:c] [:d]} :f #(update-vals % (partial * 7))}
-                {:name :j4 :uses #{[:a] [:b]} :updates #{[:a] [:b]} :f #(update-vals % (partial * 11))}
-                {:name :j5 :uses #{[:c] [:e]} :updates #{[:c] [:e]} :f #(update-vals % inc)}
-                {:name :j6 :uses #{[:c]} :updates #{[:c]} :f inc}]
+    (let [jobs [{:id :j1 :uses #{[:a] [:c]} :updates #{[:a] [:c]} :f #(update-vals % (partial * 3))}
+                {:id :j2 :uses #{[:b] [:d]} :updates #{[:b] [:d]} :f #(update-vals % (partial * 5))}
+                {:id :j3 :uses #{[:c] [:d]} :updates #{[:c] [:d]} :f #(update-vals % (partial * 7))}
+                {:id :j4 :uses #{[:a] [:b]} :updates #{[:a] [:b]} :f #(update-vals % (partial * 11))}
+                {:id :j5 :uses #{[:c] [:e]} :updates #{[:c] [:e]} :f #(update-vals % inc)}
+                {:id :j6 :uses #{[:c]} :updates #{[:c]} :f inc}]
           plan (job/jobs->execution-plan jobs)]
       (is (= {:a 33 :b 110 :c 65 :d 140 :e 6}
              (job/execute-step plan {:a 1 :b 2 :c 3 :d 4 :e 5}))))))

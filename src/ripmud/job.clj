@@ -69,16 +69,16 @@
 
 (defn validate
   "Validates a job."
-  [{:keys [runner name] :as job}]
+  [{:keys [runner id] :as job}]
   (cond
     (and (not (= (:uses job) (:updates job)))
          (not (set/subset? (:updates job) (:uses job))))
-    (throw (ex-info (str "Job " name " 'updates' is not a subset of 'uses'.") {:job job}))
+    (throw (ex-info (str "Job " id " 'updates' is not a subset of 'uses'.") {:job job}))
 
     (and runner
          (not (= (uses runner) (updates runner)))
          (not (set/subset? (updates runner) (uses runner))))
-    (throw (ex-info (str "Job " name "'s runner 'updates' is not a subset of 'uses'.") {:job job}))))
+    (throw (ex-info (str "Job " id "'s runner 'updates' is not a subset of 'uses'.") {:job job}))))
 
 (defn overlapping?
   "Returns true if two jobs incompatibly overlap in their updates/uses."
@@ -158,10 +158,10 @@
     (let [dependencies (filter #(overlapping? job %) visited-jobs)
           dependencies-without-redundancies (filter (fn not-in-dependency-dependency-graph?[dependency]
                                                       (not (some (fn in-dependency-graph?-2[dependency2]
-                                                                   (in-dependency-graph? graph (:name dependency2) (:name dependency)))
+                                                                   (in-dependency-graph? graph (:id dependency2) (:id dependency)))
                                                                  dependencies)))
                                                     dependencies)
-          graph' (assoc graph (:name job) (set (map :name dependencies-without-redundancies)))]
+          graph' (assoc graph (:id job) (set (map :id dependencies-without-redundancies)))]
       (if (seq jobs')
         (recur jobs'
                (conj visited-jobs job)
@@ -183,30 +183,30 @@
                    (> (count results) 0)
                    (update-state (first results) (:updates job)))]
       #_(locking *out*
-        #_(println "*****************************************************************" (:name job) "*****************************************************************")
-        #_(println "Job" (:name job) "total ms:" (- (System/currentTimeMillis) start-time))
-        #_(println "  Job" (:name job) " state" state)
-        #_(println "  Job" (:name job) "state'" state'))
+        #_(println "*****************************************************************" (:id job) "*****************************************************************")
+        #_(println "Job" (:id job) "total ms:" (- (System/currentTimeMillis) start-time))
+        #_(println "  Job" (:id job) " state" state)
+        #_(println "  Job" (:id job) "state'" state'))
       state')
     (catch Exception e
-      (throw (ex-info (str "Error running job " (:name job)) {:job job :exception e :state state})))))
+      (throw (ex-info (str "Error running job " (:id job)) {:job job :exception e :state state})))))
 
 (defn jobs->execution-plan
   "Returns an execution plan for a list of jobs."
   [jobs]
   (dorun (map validate jobs))
   (let [dependency-graph (jobs->dependency-graph jobs)
-        job-names (map :name jobs)
+        job-ids (map :id jobs)
         start-queue (java.util.concurrent.LinkedBlockingQueue.)
-        start-node {:job {:name ::start-node :f identity :updates #{} :uses #{}}
+        start-node {:job {:id ::start-node :f identity :updates #{} :uses #{}}
                     :dependency->queue {:whatever start-queue}
                     :output-queues []}
-        name->job (zipmap (map :name jobs) jobs)]
+        id->job (zipmap (map :id jobs) jobs)]
     (loop [nodes [start-node]
            visited-jobs []
            [job & jobs'] jobs]
       (if job
-        (let [dependencies (get dependency-graph (:name job))
+        (let [dependencies (get dependency-graph (:id job))
               dependencies (if (seq dependencies)
                              dependencies
                              #{::start-node})
@@ -215,7 +215,7 @@
                                         {}
                                         dependencies)
               nodes-with-output-queues (map (fn [node]
-                                              (if-let [queue (get dependency->queue (:name (:job node)))]
+                                              (if-let [queue (get dependency->queue (:id (:job node)))]
                                                 (assoc node :output-queues (conj (:output-queues node) queue))
                                                 node))
                                             nodes)
@@ -229,32 +229,32 @@
         (let [;; we need to hook leaf nodes up to output queues so we can get the final output
               leaf-nodes (filter #(empty? (:output-queues %)) nodes)
               leaf-jobs->queue (reduce (fn [sofar node]
-                                            (assoc sofar (:name (:job node)) (java.util.concurrent.LinkedBlockingQueue.)))
+                                            (assoc sofar (:id (:job node)) (java.util.concurrent.LinkedBlockingQueue.)))
                                           {}
                                           leaf-nodes)
               nodes-with-leaf-output-queues (map (fn [node]
-                                                   (if-let [queue (get leaf-jobs->queue (:name (:job node)))]
+                                                   (if-let [queue (get leaf-jobs->queue (:id (:job node)))]
                                                      (assoc node :output-queues (conj (:output-queues node) queue))
                                                      node))
                                                  nodes)
               ;; add an end node
               end-output-queue (java.util.concurrent.LinkedBlockingQueue.)
-              end-node {:job {:name ::end-node :f identity :updates #{} :uses #{}}
+              end-node {:job {:id ::end-node :f identity :updates #{} :uses #{}}
                         :dependency->queue leaf-jobs->queue
                         :output-queues [end-output-queue]}
               nodes-with-end-node (conj nodes-with-leaf-output-queues end-node)
               ;; create all the functions & threads & add the start queues
               nodes-with-thread (mapv (fn [{:keys [job dependency->queue output-queues] :as node}]
                                         (let [f (fn node-f[]
-                                                  (let [*visited-job-names (atom [])
-                                                        state (reduce (fn merge-job-input[state-acc [job-name queue]]
+                                                  (let [*visited-job-ids (atom [])
+                                                        state (reduce (fn merge-job-input[state-acc [job-id queue]]
                                                                         (let [job-state (.take queue)]
-                                                                          (swap! *visited-job-names conj job-name)
+                                                                          (swap! *visited-job-ids conj job-id)
                                                                           (if-not state-acc
                                                                             job-state
-                                                                            (let [roots (common-roots dependency-graph job-names @*visited-job-names)
-                                                                                  in-graph (nodes-in-dependency-graph dependency-graph job-name roots)
-                                                                                  in-graph-jobs (map name->job in-graph)
+                                                                            (let [roots (common-roots dependency-graph job-ids @*visited-job-ids)
+                                                                                  in-graph (nodes-in-dependency-graph dependency-graph job-id roots)
+                                                                                  in-graph-jobs (map id->job in-graph)
                                                                                   in-graph-updates (into #{} (mapcat (fn job-updates[{:keys [runner] :as job}]
                                                                                                                        (cond-> (:updates job)
                                                                                                                          runner

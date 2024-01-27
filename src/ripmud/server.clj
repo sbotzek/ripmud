@@ -304,21 +304,21 @@
 
 (def systems
   [
-   {:f inc
-    :name "increment-pulse"
+   {:id :increment-pulse
+    :f inc
     :uses #{[:pulse]}
     :updates #{[:pulse]}}
-   {:f slurp-effects
-    :name "slurp-effects"
+   {:id :slurp-effects
+    :f slurp-effects
     :uses #{[:effects]}
     :updates #{[:effects]}}
-   {:f handle-add-component
-    :name "handle-add-component"
+   {:id :handle-add-component
+    :f handle-add-component
     :runner (EffectHandlerJobRunner. #{:add-component})
     :uses #{[:components]}
     :updates #{[:components]}}
-   {:f handle-telnet-connection
-    :name "handle-telnet-connection"
+   {:id :handle-telnet-connection
+    :f handle-telnet-connection
     :runner (EffectHandlerJobRunner. #{:telnet-connection})
     :uses #{[:components :telnet-state]
             [:components :telnet-input]
@@ -328,17 +328,17 @@
                [:components :telnet-input]
                [:components :telnet-output]
                [:components :player]}}
-   {:f update-lifetimes
-    :name "update-lifetimes"
+   {:id :update-lifetimes
+    :f update-lifetimes
     :uses #{[:components :lifetime-tracker]}
     :updates #{[:components :lifetime-tracker]}}
-   {:f handle-telnet-input
-    :name "handle-telnet-input"
+   {:id :handle-telnet-input
+    :f handle-telnet-input
     :runner (EffectHandlerJobRunner. #{:telnet-input})
     :uses #{[:components :telnet-input]}
     :updates #{[:components :telnet-input]}}
-   {:f process-telnet-inputs
-    :name "process-telnet-inputs"
+   {:id :process-telnet-inputs
+    :f process-telnet-inputs
     :uses #{[:components :telnet-state]
             [:components :telnet-input]
             [:components :telnet-output]
@@ -347,27 +347,27 @@
                [:components :telnet-input]
                [:components :telnet-output]
                [:components :command-queue]}}
-   {:f process-command-queue
-    :name "process-command-queue"
+   {:id :process-command-queue
+    :f process-command-queue
     :uses #{[:components]}
     :updates #{[:components]}}
-   {:f process-player-perceptions
-    :name "process-player-perceptions"
+   {:id :process-player-perceptions
+    :f process-player-perceptions
     :uses #{[:components :player]
             [:components :perceptor]
             [:components :telnet-state]
             [:components :telnet-output]}
     :updates #{[:components :perceptor]
                [:components :telnet-output]}}
-   {:f process-npc-perceptions
-    :name "process-npc-perceptions"
+   {:id :process-npc-perceptions
+    :f process-npc-perceptions
     :uses #{[:components :perceptor]
             [:components :player]
             [:components :command-queue]}
     :updates #{[:components :perceptor]
                [:components :command-queue]}}
-   {:f write-telnet-outputs
-    :name "write-telnet-outputs"
+   {:id :write-telnet-outputs
+    :f write-telnet-outputs
     :uses #{[:components :telnet-output]
             [:components :telnet-state]}
     :updates #{[:components :telnet-output]}}
