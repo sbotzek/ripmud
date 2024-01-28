@@ -18,7 +18,8 @@
      (alter *entities conj entity)
      entity)))
 
-;;; Effects are for things that come about from outside a system, like input from a telnet socket.
+;;; Effects are for things that come about from outside a system, like input
+;;; from a telnet socket.  Once a system handles an effect, it is discarded.
 (def effect-queue (java.util.concurrent.ConcurrentLinkedQueue.))
 
 (defn slurp-effects
@@ -26,6 +27,11 @@
   (if-let [effect (.poll effect-queue)]
     (recur (update effects (:type effect) conj effect))
     effects))
+
+(defn slurp-events
+  [{:keys [event-queue]}]
+  {:event-queue []
+   :events event-queue})
 
 (defn run-game-server
   [config systems]
@@ -65,7 +71,7 @@
 (defprotocol TelnetState
   (telnet-state-prompt [state])
   (telnet-state-entered [state telnet-input telnet-output])
-  (telnet-state-input [state telnet-input telnet-output command-queue])
+  (telnet-state-input [state entity telnet-input telnet-output command-queue])
   (telnet-state-left [state telnet-input telnet-output]))
 
 (def command-table
@@ -121,7 +127,7 @@
   (telnet-state-prompt [state] "> ")
   (telnet-state-entered [state telnet-input telnet-output]
     [state telnet-input (update telnet-output :output concat [(str "Welcome " name "!\r\n")])])
-  (telnet-state-input [state {:keys [input] :as telnet-input} telnet-output command-queue]
+  (telnet-state-input [state entity {:keys [input] :as telnet-input} telnet-output command-queue]
     (loop [[line & input'] input
            command-queue' command-queue]
       (if line
@@ -144,9 +150,13 @@
     "What is your name? ")
   (telnet-state-entered [state telnet-input telnet-output]
     [state telnet-input (update telnet-output :output concat ["Welcome to RIPMUD!\r\n"])])
-  (telnet-state-input [state {:keys [input] :as telnet-input} telnet-output command-queue]
+  (telnet-state-input [state entity {:keys [input] :as telnet-input} telnet-output command-queue]
     (if-let [line (first input)]
-      [(TelnetStatePlaying. line) (update telnet-input :input rest) telnet-output]
+      [(TelnetStatePlaying. line)
+       (update telnet-input :input rest)
+       telnet-output
+       command-queue
+       [{:type :playing :entity entity :name line}]]
       [state telnet-input telnet-output]))
   (telnet-state-left [state telnet-input telnet-output]))
 
@@ -168,22 +178,26 @@
 (defn process-telnet-inputs
   "Takes input from the telnet-input component and processes the command, writing any output to the telnet-output component."
   [components]
-  (let [*components (atom components)]
+  (let [*components (atom components)
+        *events (atom [])]
     (doseq [[entity telnet-input] (:telnet-input components)]
       (when (seq (:input telnet-input))
         (let [telnet-output (get-in components [:telnet-output entity])
               telnet-state (get-in components [:telnet-state entity])
               command-queue (get-in components [:command-queue entity])]
-          (let [[telnet-state' telnet-input' telnet-output' command-queue'] (telnet-state-input telnet-state telnet-input telnet-output command-queue)
+          (let [[telnet-state' telnet-input' telnet-output' command-queue' events'] (telnet-state-input telnet-state entity telnet-input telnet-output command-queue)
                 [telnet-state' telnet-input' telnet-output'] (if (= (type telnet-state) (type telnet-state'))
                                                                [telnet-state' telnet-input' telnet-output']
                                                                ;; call entered
                                                                (telnet-state-entered telnet-state' telnet-input' telnet-output'))]
+
+            (swap! *events into events')
             (swap! *components assoc-in [:telnet-state entity] telnet-state')
             (swap! *components assoc-in [:telnet-input entity] telnet-input')
             (swap! *components assoc-in [:telnet-output entity] telnet-output')
             (swap! *components assoc-in [:command-queue entity] command-queue')))))
-    @*components))
+    {:components @*components
+     :event-queue @*events}))
 
 (defn process-command-queue
   [components]
@@ -200,6 +214,13 @@
             (swap! *components update-in [:telnet-output entity :output] concat [(str "Unknown command: " str-cmd "\r\n")])))))
     @*components))
 
+
+(defn actor-name
+  [actor entity components]
+  (if (= actor entity)
+    "You"
+    (str/capitalize (get-in components [:desc actor :name]))))
+
 (defn process-player-perceptions
   "Takes perceptions from the perceptor component and writes them to the telnet-output component."
   [components]
@@ -212,15 +233,17 @@
             (doseq [{:keys [act actor] :as action} perceptions]
               (case act
                 :say
-                (if (= actor entity)
-                  (swap! *components update-in [:telnet-output entity :output] concat [(str "You say \"" (:message action) "\"\r\n")])
-                  (swap! *components update-in [:telnet-output entity :output] concat [(str actor " says \"" (:message action) "\"\r\n")]))
+                (swap! *components update-in [:telnet-output entity :output] concat [(str (actor-name actor entity components) " says \"" (:message action) "\"\r\n")])
+
                 :shout
-                (if (= actor entity)
-                  (swap! *components update-in [:telnet-output entity :output] concat [(str "You shout \"" (:message action) "\"\r\n")])
-                  (swap! *components update-in [:telnet-output entity :output] concat [(str actor " shouts \"" (:message action) "\"\r\n")]))
+                (swap! *components update-in [:telnet-output entity :output] concat [(str (actor-name actor entity components) " shouts \"" (:message action) "\"\r\n")])
+
                 (throw (ex-info (str "Unknown act: " act) {:act act}))))))))
     @*components))
+
+(defn on-playing-event
+  [components {:keys [entity name]}]
+  (assoc components entity {:name name}))
 
 (defn process-npc-perceptions
   "Takes perceptions from the perceptor component and writes them to the telnet-output component."
@@ -289,6 +312,21 @@
     #{[:effects handle-effect]})
   (appends [this] #{}))
 
+(defrecord EventListenerJobRunner [handle-events]
+  job/JobRunner
+  (run [{:keys [handle-events] :as this}
+        events
+        {:keys [f] :as job}
+        job-arg]
+    (if-let [events-handling (filter #(= handle-events (:type %)) events)]
+      (let [job-result (reduce f job-arg events-handling)]
+        [job-result nil])
+      [job-arg nil]))
+  (uses [this]
+    #{[:events]})
+  (updates [this]
+    #{}))
+
 (defrecord PeriodicJobRunner [pulses]
   job/JobRunner
   (run [this pulse
@@ -305,19 +343,28 @@
 
 (def systems
   [
-   {:id :increment-pulse
-    :f inc
-    :uses #{[:pulse]}
-    :updates #{[:pulse]}}
    {:id :slurp-effects
     :f slurp-effects
     :uses #{[:effects]}
     :updates #{[:effects]}}
+   {:id :slurp-events
+    :f slurp-events
+    :uses #{[:events] [:event-queue]}
+    :updates #{[:events] [:event-queue]}}
+   {:id :increment-pulse
+    :f inc
+    :uses #{[:pulse]}
+    :updates #{[:pulse]}}
    {:id :handle-add-component
     :f handle-add-component
     :runner (EffectHandlerJobRunner. :add-component)
     :uses #{[:components]}
     :updates #{[:components]}}
+   {:id :on-playing-event
+    :f on-playing-event
+    :runner (EventListenerJobRunner. :playing)
+    :uses #{[:components :desc]}
+    :updates #{[:components :desc]}}
    {:id :handle-telnet-connection
     :f handle-telnet-connection
     :runner (EffectHandlerJobRunner. :telnet-connection)
@@ -347,7 +394,8 @@
     :updates #{[:components :telnet-state]
                [:components :telnet-input]
                [:components :telnet-output]
-               [:components :command-queue]}}
+               [:components :command-queue]}
+    :appends #{[:event-queue]}}
    {:id :process-command-queue
     :f process-command-queue
     :uses #{[:components]}
@@ -355,6 +403,7 @@
    {:id :process-player-perceptions
     :f process-player-perceptions
     :uses #{[:components :player]
+            [:components :desc]
             [:components :perceptor]
             [:components :telnet-state]
             [:components :telnet-output]}
