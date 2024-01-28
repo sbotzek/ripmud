@@ -24,7 +24,7 @@
 (defn slurp-effects
   [effects]
   (if-let [effect (.poll effect-queue)]
-    (recur (conj effects effect))
+    (recur (update effects (:type effect) conj effect))
     effects))
 
 (defn run-game-server
@@ -34,7 +34,7 @@
     #_(pprint execution-plan)
     (loop [game-state {:pulse 0
                        :components {}
-                       :effects []}]
+                       :effects {}}]
       #_(pprint game-state)
       #_(println "game-state" game-state)
       (let [start-time (System/currentTimeMillis)]
@@ -275,20 +275,18 @@
                                      (println (str "Received: " line))
                                      (.offer effect-queue {:type :telnet-input :entity entity :line line}))))))])))))
 
-(defrecord EffectHandlerJobRunner [handle-effects]
+(defrecord EffectHandlerJobRunner [handle-effect]
   job/JobRunner
-  (run [{:keys [handle-effects] :as this}
+  (run [{:keys [handle-effect] :as this}
         effects
         {:keys [f] :as job}
         job-arg]
-    (let [handling-effects (filter #(get handle-effects (:type %)) effects)
-          effects' (filter #(not (get handle-effects (:type %))) effects)
-          job-result (reduce f job-arg handling-effects)]
-      [job-result effects']))
+    (let [job-result (reduce f job-arg effects)]
+      [job-result nil]))
   (uses [this]
-    #{[:effects]})
+    #{[:effects handle-effect]})
   (updates [this]
-    #{[:effects]}))
+    #{[:effects handle-effect]}))
 
 (defrecord PeriodicJobRunner [pulses]
   job/JobRunner
@@ -314,12 +312,12 @@
     :updates #{[:effects]}}
    {:id :handle-add-component
     :f handle-add-component
-    :runner (EffectHandlerJobRunner. #{:add-component})
+    :runner (EffectHandlerJobRunner. :add-component)
     :uses #{[:components]}
     :updates #{[:components]}}
    {:id :handle-telnet-connection
     :f handle-telnet-connection
-    :runner (EffectHandlerJobRunner. #{:telnet-connection})
+    :runner (EffectHandlerJobRunner. :telnet-connection)
     :uses #{[:components :telnet-state]
             [:components :telnet-input]
             [:components :telnet-output]
@@ -334,7 +332,7 @@
     :updates #{[:components :lifetime-tracker]}}
    {:id :handle-telnet-input
     :f handle-telnet-input
-    :runner (EffectHandlerJobRunner. #{:telnet-input})
+    :runner (EffectHandlerJobRunner. :telnet-input)
     :uses #{[:components :telnet-input]}
     :updates #{[:components :telnet-input]}}
    {:id :process-telnet-inputs
