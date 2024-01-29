@@ -286,7 +286,8 @@
   (uses [this]
     #{[:effects handle-effect]})
   (updates [this]
-    #{[:effects handle-effect]}))
+    #{[:effects handle-effect]})
+  (appends [this] #{}))
 
 (defrecord PeriodicJobRunner [pulses]
   job/JobRunner
@@ -298,6 +299,8 @@
   (uses [this]
     #{[:pulse]})
   (updates [this]
+    #{})
+  (appends [this]
     #{}))
 
 (def systems

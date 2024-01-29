@@ -7,7 +7,8 @@
   "A protocol for customizing how jobs are run."
   (run [this runner-arg job job-arg])
   (uses [this])
-  (updates [this]))
+  (updates [this])
+  (appends [this]))
 
 (defrecord SimpleJobRunner []
   JobRunner
@@ -17,6 +18,8 @@
   (uses [this]
     #{})
   (updates [this]
+    #{})
+  (appends [this]
     #{}))
 
 (def *default-job-runner (atom (SimpleJobRunner.)))
@@ -40,32 +43,83 @@
 
 (defn update-state
   "Updates the state from the result based upon the keys in updates."
-  [state result updates]
-  ;; TODO: calculating the 'shape' could be a 1 time thing
-  (loop [result-shape (reduce (fn [sofar arg]
-                                (assoc-in sofar arg {}))
-                              {}
-                              updates)
-         result-path []]
-    (if (= 1 (count result-shape))
-      (recur
-       (first (vals result-shape))
-       (conj result-path (first (keys result-shape))))
-      (let [result (if (seq result-path)
-                     (assoc-in {} result-path result)
-                     result)]
-        (reduce (fn [sofar arg]
-                  (assoc-in sofar arg (get-in result arg)))
-                state
-                updates)))))
+  ([state result updates]
+   (update-state state result updates nil nil))
+  ([state result updates appends appends-job-key]
+   ;; TODO: calculating the 'shape' could be a 1 time thing
+   (loop [result-shape (reduce (fn [sofar arg]
+                                 (assoc-in sofar arg {}))
+                               {}
+                               (concat updates appends))
+          result-path []]
+     (if (= 1 (count result-shape))
+       (recur
+        (first (vals result-shape))
+        (conj result-path (first (keys result-shape))))
+       (let [result (if (seq result-path)
+                      (assoc-in {} result-path result)
+                      result)]
+         (reduce (fn [sofar arg]
+                   (if (contains? appends arg)
+                     (let [path (conj (into [] (cons ::appends arg)) appends-job-key)]
+                       (assoc-in sofar path (get-in result arg)))
+                     (assoc-in sofar arg (get-in result arg))))
+                 state
+                 (concat updates appends)))))))
+
+(defn apply-appends
+  ([state]
+   (letfn [(append-merge-r [m1 m2]
+             (reduce (fn append-merge-r-kv[acc [k v]]
+                       (let [first-val (second (first v))]
+                         (cond
+                           (map? first-val)
+                           (assoc acc k (append-merge-r (get m1 k {}) v))
+
+                           (nil? first-val)
+                           (assoc acc k (append-merge-r (get m1 k {}) v))
+
+                           (not (seqable? first-val))
+                           (throw (ex-info (str "Can't merge " k " because nested value in v not seqable") {:k k :v v :acc acc}))
+
+                           (map? (k acc))
+                           (throw (ex-info (str "Can't merge " k " because (k acc) is a map") {:k k :v v :acc acc}))
+
+                           (not (seqable? (k acc)))
+                           (throw (ex-info (str "Can't merge " k " because (k acc) is not seqable") {:k k :v v :acc acc}))
+
+                           :else
+                           (update acc k #(into (or % []) (mapcat second (into (sorted-map-by <) v)))))))
+                       m1
+                       m2))]
+     (let [append-m (get state ::appends)
+           state-without-appends (dissoc state ::appends)]
+       (append-merge-r state-without-appends append-m))))
+  ([state ks]
+   (if-not (::appends state)
+     state
+     (reduce (fn update-for-key[acc k]
+               (if-let [data-to-append (get-in (::appends acc) k)]
+                 (let [acc-without-appends (update-in acc (cons ::appends (butlast k)) dissoc (last k))
+                       acc-with-data (update-in acc-without-appends k #(into (or % []) (mapcat second (into (sorted-map-by <) data-to-append))))]
+                   acc-with-data)
+                 acc))
+             state
+             ks))))
+
 
 (defn merge-keys
   "Merges a list of keps from one map into another."
-  [state state' keys]
-  (reduce (fn [sofar key]
-            (assoc-in sofar key (get-in state' key)))
-          state
-          keys))
+  [state state' keys append-keys]
+  (let [state-with-updates (reduce (fn [sofar k]
+                                     (assoc-in sofar k (get-in state' k)))
+                                   state
+                                   keys)
+        state-with-appends (reduce (fn [acc k]
+                                     (update-in acc (cons ::appends k) merge (get-in state' (cons ::appends k))))
+                                   state-with-updates
+                                   append-keys)]
+    state-with-appends))
 
 (defn validate
   "Validates a job."
@@ -75,10 +129,17 @@
          (not (set/subset? (:updates job) (:uses job))))
     (throw (ex-info (str "Job " id " 'updates' is not a subset of 'uses'.") {:job job}))
 
+    (some (:updates job) (:appends job))
+    (throw (ex-info (str "Job " id " 'appends' contained in 'updates'") {:job job}))
+
+    (some (:uses job) (:appends job))
+    (throw (ex-info (str "Job " id " 'appends' contained in 'uses'") {:job job}))
+
     (and runner
          (not (= (uses runner) (updates runner)))
          (not (set/subset? (updates runner) (uses runner))))
     (throw (ex-info (str "Job " id "'s runner 'updates' is not a subset of 'uses'.") {:job job}))))
+
 
 (defn overlapping?
   "Returns true if two jobs incompatibly overlap in their updates/uses."
@@ -87,8 +148,8 @@
         runner2 (or (:runner job2) @*default-job-runner)
         uses1 (into (:uses job1) (uses runner1))
         uses2 (into (:uses job2) (uses runner2))
-        updates1 (into (:updates job1) (updates runner1))
-        updates2 (into (:updates job2) (updates runner2))]
+        updates1 (into #{} (concat (:updates job1) (:appends job1) (updates runner1)))
+        updates2 (into #{} (concat (:updates job2) (:appends job2) (updates runner2)))]
     (or (some (fn [update]
                 (some (fn [uses]
                         (let [c (min (count update) (count uses))]
@@ -181,7 +242,7 @@
                    (update-state (second results) (updates runner))
 
                    (> (count results) 0)
-                   (update-state (first results) (:updates job)))]
+                   (update-state (first results) (:updates job) (:appends job) (:index job)))]
       #_(locking *out*
         #_(println "*****************************************************************" (:id job) "*****************************************************************")
         #_(println "Job" (:id job) "total ms:" (- (System/currentTimeMillis) start-time))
@@ -195,7 +256,10 @@
   "Returns an execution plan for a list of jobs."
   [jobs]
   (dorun (map validate jobs))
-  (let [dependency-graph (jobs->dependency-graph jobs)
+  (let [jobs (map-indexed (fn [i job]
+                            (assoc job :index i))
+                          jobs)
+        dependency-graph (jobs->dependency-graph jobs)
         job-ids (map :id jobs)
         start-queue (java.util.concurrent.LinkedBlockingQueue.)
         start-node {:job {:id ::start-node :f identity :updates #{} :uses #{}}
@@ -259,11 +323,18 @@
                                                                                                                        (cond-> (:updates job)
                                                                                                                          runner
                                                                                                                          (concat (updates runner))))
+                                                                                                                     in-graph-jobs))
+                                                                                  in-graph-appends (into #{} (mapcat (fn job-updates[{:keys [runner] :as job}]
+                                                                                                                       (cond-> (:appends job)
+                                                                                                                         runner
+                                                                                                                         (concat (appends runner))))
                                                                                                                      in-graph-jobs))]
-                                                                              (merge-keys state-acc job-state in-graph-updates)))))
+                                                                              (merge-keys state-acc job-state in-graph-updates in-graph-appends)))))
                                                                       nil
                                                                       dependency->queue)
-                                                        state' (run-job state job)]
+                                                        state' (-> state
+                                                                   (apply-appends (:uses job))
+                                                                   (run-job job))]
                                                     (doseq [queue output-queues]
                                                       (.offer queue state'))
                                                     (recur)))]
@@ -280,4 +351,4 @@
   "Runs the execution plan for a single step, returning the result."
   [execution-plan state]
   (.offer (:start-queue execution-plan) state)
-  (.take (:end-queue execution-plan)))
+  (apply-appends (.take (:end-queue execution-plan))))
