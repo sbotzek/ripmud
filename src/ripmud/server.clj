@@ -329,8 +329,9 @@
         effects
         {:keys [f] :as job}
         job-arg]
-    (let [job-result (reduce f job-arg effects)]
-      [job-result nil]))
+    (when (seq effects)
+      (let [job-result (reduce f job-arg effects)]
+        [job-result nil])))
   (uses [this]
     #{[:effects handle-effect]})
   (updates [this]
@@ -343,10 +344,10 @@
         events
         {:keys [f] :as job}
         job-arg]
-    (if-let [events-handling (filter #(= handle-events (:type %)) events)]
-      (let [job-result (reduce f job-arg events-handling)]
-        [job-result nil])
-      [job-arg nil]))
+    (let [events-handling (filter #(= handle-events (:type %)) events)]
+      (when (seq events-handling)
+        (let [job-result (reduce f job-arg events-handling)]
+          [job-result nil]))))
   (uses [this]
     #{[:events]})
   (updates [this]
@@ -356,9 +357,8 @@
   job/JobRunner
   (run [this pulse
         {:keys [f] :as job} job-arg]
-    (if (zero? (mod pulse (:pulses this)))
-      [(f job-arg)]
-      [job-arg]))
+    (when (zero? (mod pulse (:pulses this)))
+      [(f job-arg)]))
   (uses [this]
     #{[:pulse]})
   (updates [this]
