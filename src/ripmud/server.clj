@@ -18,6 +18,49 @@
      (alter *entities conj entity)
      entity)))
 
+(defrecord EffectHandlerJobRunner [handle-effect]
+  job/JobRunner
+  (run [{:keys [handle-effect] :as this}
+        effects
+        {:keys [f] :as job}
+        job-arg]
+    (when (seq effects)
+      (let [job-result (reduce f job-arg effects)]
+        [job-result nil])))
+  (uses [this]
+    #{[:effects handle-effect]})
+  (updates [this]
+    #{[:effects handle-effect]})
+  (appends [this] #{}))
+
+(defrecord EventListenerJobRunner [handle-events]
+  job/JobRunner
+  (run [{:keys [handle-events] :as this}
+        events
+        {:keys [f] :as job}
+        job-arg]
+    (let [events-handling (filter #(= handle-events (:type %)) events)]
+      (when (seq events-handling)
+        (let [job-result (reduce f job-arg events-handling)]
+          [job-result nil]))))
+  (uses [this]
+    #{[:events]})
+  (updates [this]
+    #{}))
+
+(defrecord PeriodicJobRunner [pulses]
+  job/JobRunner
+  (run [this pulse
+        {:keys [f] :as job} job-arg]
+    (when (zero? (mod pulse (:pulses this)))
+      [(f job-arg)]))
+  (uses [this]
+    #{[:pulse]})
+  (updates [this]
+    #{})
+  (appends [this]
+    #{}))
+
 ;;; Effects are for things that come about from outside a system, like input
 ;;; from a telnet socket.  Once a system handles an effect, it is discarded.
 (def effect-queue (java.util.concurrent.ConcurrentLinkedQueue.))
@@ -28,11 +71,28 @@
     (recur (update effects (:type effect) conj effect))
     effects))
 
+(def s-slurp-effects
+  {:id :slurp-effects
+   :f slurp-effects
+   :uses #{[:effects]}
+   :updates #{[:effects]}})
+
 (defn slurp-events
   [{:keys [event-queue]}]
   {:event-queue []
    :events event-queue})
 
+(def s-slurp-events
+  {:id :slurp-events
+   :f slurp-events
+   :uses #{[:events] [:event-queue]}
+   :updates #{[:events] [:event-queue]}})
+
+(def s-increment-pulse
+  {:id :increment-pulse
+   :f inc
+   :uses #{[:pulse]}
+   :updates #{[:pulse]}})
 
 (defn add-entity-with-components
   [components entity entity-components]
@@ -68,12 +128,26 @@
   [components {:keys [entity component data]}]
   (assoc-in components [component entity] data))
 
+(def s-handle-add-component
+  {:id :handle-add-component
+   :f handle-add-component
+   :runner (EffectHandlerJobRunner. :add-component)
+   :uses #{[:components]}
+   :updates #{[:components]}})
+
 (defn handle-telnet-input
   "Takes telnet input effects and puts them into the correct entity's component."
   [telnet-inputs effect]
   (let [{:keys [entity line]} effect
         telnet-input (get telnet-inputs entity)]
     (assoc telnet-inputs entity (update telnet-input :input conj line))))
+
+(def s-handle-telnet-input
+  {:id :handle-telnet-input
+    :f handle-telnet-input
+    :runner (EffectHandlerJobRunner. :telnet-input)
+    :uses #{[:components :telnet-input]}
+    :updates #{[:components :telnet-input]}})
 
 (defn player?
   "Returns true if the entity is a player."
@@ -193,6 +267,19 @@
                       true (assoc-in [:telnet-output entity] telnet-output))]
     components'))
 
+(def s-handle-telnet-connection
+  {:id :handle-telnet-connection
+   :f handle-telnet-connection
+   :runner (EffectHandlerJobRunner. :telnet-connection)
+   :uses #{[:components :telnet-state]
+           [:components :telnet-input]
+           [:components :telnet-output]
+           [:components :player]}
+   :updates #{[:components :telnet-state]
+              [:components :telnet-input]
+              [:components :telnet-output]
+              [:components :player]}})
+
 (defn process-telnet-inputs
   "Takes input from the telnet-input component and processes the command, writing any output to the telnet-output component."
   [components]
@@ -217,6 +304,19 @@
     {:components @*components
      :event-queue @*events}))
 
+(def s-process-telnet-inputs
+  {:id :process-telnet-inputs
+    :f process-telnet-inputs
+    :uses #{[:components :telnet-state]
+            [:components :telnet-input]
+            [:components :telnet-output]
+            [:components :command-queue]}
+    :updates #{[:components :telnet-state]
+               [:components :telnet-input]
+               [:components :telnet-output]
+               [:components :command-queue]}
+    :appends #{[:event-queue]}})
+
 (defn process-command-queue
   [components]
   (let [*components (atom components)]
@@ -232,6 +332,11 @@
             (swap! *components update-in [:telnet-output entity :output] concat [(str "Unknown command: " str-cmd "\r\n")])))))
     @*components))
 
+(def s-process-command-queue
+  {:id :process-command-queue
+    :f process-command-queue
+    :uses #{[:components]}
+    :updates #{[:components]}})
 
 (defn actor-name
   [actor entity components]
@@ -274,6 +379,13 @@
                 (throw (ex-info (str "Unknown act: " act) {:act act}))))))))
     @*components))
 
+(def s-process-player-perceptions
+  {:id :process-player-perceptions
+    :f process-player-perceptions
+    :uses #{[:components]}
+    :updates #{[:components :perceptor]
+               [:components :telnet-output]}})
+
 (defn on-playing-event
   [{:keys [start-entity components] :as state}
    {:keys [entity name]}]
@@ -282,6 +394,18 @@
       (assoc-in [:location entity] start-entity)
       (assoc-in [:contains entity] [])
       (update-in [:contains start-entity] into [entity])))
+
+(def s-on-playing-event
+  {:id :on-playing-event
+   :f on-playing-event
+   :runner (EventListenerJobRunner. :playing)
+   :uses #{[:start-entity]
+           [:components :desc]
+           [:components :location]
+           [:components :contains]}
+   :updates #{[:components :desc]
+              [:components :location]
+              [:components :contains]}})
 
 (defn process-npc-perceptions
   "Takes perceptions from the perceptor component and writes them to the telnet-output component."
@@ -296,6 +420,15 @@
                 true
                 #_(println "NPC" entity "perceived" act "from" actor))))))
     (assoc components :perceptor (persistent! @*perceptors))))
+
+(def s-process-npc-perceptions
+  {:id :process-npc-perceptions
+    :f process-npc-perceptions
+    :uses #{[:components :perceptor]
+            [:components :player]
+            [:components :command-queue]}
+    :updates #{[:components :perceptor]
+               [:components :command-queue]}})
 
 (defn write-telnet-outputs
   "Takes output from the telnet-output component and writes it to the socket."
@@ -312,11 +445,24 @@
           (.flush out))))
     @*telnet-outputs'))
 
+(def s-write-telnet-outputs
+  {:id :write-telnet-outputs
+    :f write-telnet-outputs
+    :uses #{[:components :telnet-output]
+            [:components :telnet-state]}
+    :updates #{[:components :telnet-output]}})
+
 (defn update-lifetimes
   [entity->lifetimes]
   (update-vals entity->lifetimes
                (fn [lifetime-tracker]
                  (update lifetime-tracker :pulses inc))))
+
+(def s-update-lifetimes
+  {:id :update-lifetimes
+   :f update-lifetimes
+   :uses #{[:components :lifetime-tracker]}
+   :updates #{[:components :lifetime-tracker]}})
 
 (defn run-telnet-server
   [{:keys [port] :as config}]
@@ -336,130 +482,21 @@
                                      (println (str "Received: " line))
                                      (.offer effect-queue {:type :telnet-input :entity entity :line line}))))))])))))
 
-(defrecord EffectHandlerJobRunner [handle-effect]
-  job/JobRunner
-  (run [{:keys [handle-effect] :as this}
-        effects
-        {:keys [f] :as job}
-        job-arg]
-    (when (seq effects)
-      (let [job-result (reduce f job-arg effects)]
-        [job-result nil])))
-  (uses [this]
-    #{[:effects handle-effect]})
-  (updates [this]
-    #{[:effects handle-effect]})
-  (appends [this] #{}))
-
-(defrecord EventListenerJobRunner [handle-events]
-  job/JobRunner
-  (run [{:keys [handle-events] :as this}
-        events
-        {:keys [f] :as job}
-        job-arg]
-    (let [events-handling (filter #(= handle-events (:type %)) events)]
-      (when (seq events-handling)
-        (let [job-result (reduce f job-arg events-handling)]
-          [job-result nil]))))
-  (uses [this]
-    #{[:events]})
-  (updates [this]
-    #{}))
-
-(defrecord PeriodicJobRunner [pulses]
-  job/JobRunner
-  (run [this pulse
-        {:keys [f] :as job} job-arg]
-    (when (zero? (mod pulse (:pulses this)))
-      [(f job-arg)]))
-  (uses [this]
-    #{[:pulse]})
-  (updates [this]
-    #{})
-  (appends [this]
-    #{}))
-
 (def systems
   [
-   {:id :slurp-effects
-    :f slurp-effects
-    :uses #{[:effects]}
-    :updates #{[:effects]}}
-   {:id :slurp-events
-    :f slurp-events
-    :uses #{[:events] [:event-queue]}
-    :updates #{[:events] [:event-queue]}}
-   {:id :increment-pulse
-    :f inc
-    :uses #{[:pulse]}
-    :updates #{[:pulse]}}
-   {:id :handle-add-component
-    :f handle-add-component
-    :runner (EffectHandlerJobRunner. :add-component)
-    :uses #{[:components]}
-    :updates #{[:components]}}
-   {:id :on-playing-event
-    :f on-playing-event
-    :runner (EventListenerJobRunner. :playing)
-    :uses #{[:start-entity]
-            [:components :desc]
-            [:components :location]
-            [:components :contains]}
-    :updates #{[:components :desc]
-               [:components :location]
-               [:components :contains]}}
-   {:id :handle-telnet-connection
-    :f handle-telnet-connection
-    :runner (EffectHandlerJobRunner. :telnet-connection)
-    :uses #{[:components :telnet-state]
-            [:components :telnet-input]
-            [:components :telnet-output]
-            [:components :player]}
-    :updates #{[:components :telnet-state]
-               [:components :telnet-input]
-               [:components :telnet-output]
-               [:components :player]}}
-   {:id :update-lifetimes
-    :f update-lifetimes
-    :uses #{[:components :lifetime-tracker]}
-    :updates #{[:components :lifetime-tracker]}}
-   {:id :handle-telnet-input
-    :f handle-telnet-input
-    :runner (EffectHandlerJobRunner. :telnet-input)
-    :uses #{[:components :telnet-input]}
-    :updates #{[:components :telnet-input]}}
-   {:id :process-telnet-inputs
-    :f process-telnet-inputs
-    :uses #{[:components :telnet-state]
-            [:components :telnet-input]
-            [:components :telnet-output]
-            [:components :command-queue]}
-    :updates #{[:components :telnet-state]
-               [:components :telnet-input]
-               [:components :telnet-output]
-               [:components :command-queue]}
-    :appends #{[:event-queue]}}
-   {:id :process-command-queue
-    :f process-command-queue
-    :uses #{[:components]}
-    :updates #{[:components]}}
-   {:id :process-player-perceptions
-    :f process-player-perceptions
-    :uses #{[:components]}
-    :updates #{[:components :perceptor]
-               [:components :telnet-output]}}
-   {:id :process-npc-perceptions
-    :f process-npc-perceptions
-    :uses #{[:components :perceptor]
-            [:components :player]
-            [:components :command-queue]}
-    :updates #{[:components :perceptor]
-               [:components :command-queue]}}
-   {:id :write-telnet-outputs
-    :f write-telnet-outputs
-    :uses #{[:components :telnet-output]
-            [:components :telnet-state]}
-    :updates #{[:components :telnet-output]}}
+   s-slurp-effects
+   s-slurp-events
+   s-increment-pulse
+   s-handle-add-component
+   s-on-playing-event
+   s-handle-telnet-connection
+   s-update-lifetimes
+   s-handle-telnet-input
+   s-process-telnet-inputs
+   s-process-command-queue
+   s-process-player-perceptions
+   s-process-npc-perceptions
+   s-write-telnet-outputs
    ])
 
 (defn -main
