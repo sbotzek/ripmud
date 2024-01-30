@@ -340,7 +340,10 @@
                                                                       nil
                                                                       dependency->queue)
                                                         state' (-> state
-                                                                   (apply-appends (:uses job))
+                                                                   ;; TODO no test tests that we factor in the runner
+                                                                   (apply-appends (cond-> (:uses job)
+                                                                                    (:runner job)
+                                                                                    (concat (uses (:runner job)))))
                                                                    (run-job job))]
                                                     (doseq [queue output-queues]
                                                       (.offer queue state'))
