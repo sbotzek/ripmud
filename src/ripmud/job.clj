@@ -125,8 +125,11 @@
   "Validates a job."
   [{:keys [runner id] :as job}]
   (cond
-    (and (not (= (:uses job) (:updates job)))
-         (not (set/subset? (:updates job) (:uses job))))
+    (not (every? (fn update-in-uses[update]
+                   (some (fn uses-has-update[uses]
+                           (= (take (count uses) update) uses))
+                         (:uses job)))
+                 (:updates job)))
     (throw (ex-info (str "Job " id " 'updates' is not a subset of 'uses'.") {:job job}))
 
     (some (:updates job) (:appends job))
@@ -138,7 +141,10 @@
     (and runner
          (not (= (uses runner) (updates runner)))
          (not (set/subset? (updates runner) (uses runner))))
-    (throw (ex-info (str "Job " id "'s runner 'updates' is not a subset of 'uses'.") {:job job}))))
+    (throw (ex-info (str "Job " id "'s runner 'updates' is not a subset of 'uses'.") {:job job}))
+
+    :else
+    true))
 
 
 (defn overlapping?

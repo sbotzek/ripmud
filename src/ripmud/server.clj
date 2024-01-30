@@ -431,9 +431,7 @@
     :updates #{[:components]}}
    {:id :process-player-perceptions
     :f process-player-perceptions
-    :uses #{[:components]
-            [:components :perceptor]
-            [:components :telnet-output]}
+    :uses #{[:components]}
     :updates #{[:components :perceptor]
                [:components :telnet-output]}}
    {:id :process-npc-perceptions

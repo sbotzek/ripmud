@@ -93,42 +93,50 @@
 
 (deftest test-validate
   (testing "Job validates when 'uses' same as 'updates'."
-    (is (not (job/validate {:id :test
-                            :uses #{:a :b :c}
-                            :updates #{:a :b :c}}))))
+    (is (job/validate {:id :test
+                            :uses #{[:a] [:b] [:c]}
+                            :updates #{[:a] [:b] [:c]}})))
   (testing "Job validates when 'uses' superset of 'updates'."
-    (is (not (job/validate {:id :test
-                            :uses #{:a :b :c :d}
-                            :updates #{:a :b :c}}))))
+    (is (job/validate {:id :test
+                            :uses #{[:a] [:b] [:c] [:d]}
+                            :updates #{[:a] [:b] [:c]}})))
   (testing "Cannot both 'use' and 'append' the same key."
     (is (thrown? Exception (job/validate {:id :test
-                                          :uses #{:a :b :c}
-                                          :appends #{:a :c :d}
+                                          :uses #{[:a] [:b] [:c]}
+                                          :appends #{[:a] [:c] [:d]}
                                           :updates #{}}))))
   (testing "Cannot both 'use' and 'update' the same key."
     (is (thrown? Exception (job/validate {:id :test
-                                          :uses #{:a :b :c}
-                                          :appends #{:a :c :d}
-                                          :updates #{:a :b :c}}))))
+                                          :uses #{[:a] [:b] [:c]}
+                                          :appends #{[:a] [:c] [:d]}
+                                          :updates #{[:a] [:b] [:c]}}))))
   (testing "Job doesn't validate when 'uses' is not a superset of 'updates'."
     (is (thrown? Exception (job/validate {:id :test
-                                          :uses #{:a :b :c}
-                                          :updates #{:a :c :d}}))))
+                                          :uses #{[:a] [:b] [:c]}
+                                          :updates #{[:a] [:c] [:d]}}))))
+  (testing "Job validates when 'uses' is a prefix of 'updates'."
+    (is (job/validate {:id :testxx
+                       :uses #{[:a]}
+                       :updates #{[:a :b]}})))
+  (testing "Job doesn't validate when 'updates' is a prefix of 'uses'."
+    (is (thrown? Exception (job/validate {:id :test
+                                          :uses #{[:a :b]}
+                                          :updates #{[:a]}}))))
   (testing "Runner validates when 'uses' same as 'updates'."
-    (is (not (job/validate {:id :test
+    (is (job/validate {:id :test
                             :uses #{}
                             :updates #{}
-                            :runner (TestJobRunner. inc #{:a :b :c} #{:a :b :c})}))))
+                            :runner (TestJobRunner. inc #{[:a] [:b] [:c]} #{[:a] [:b] [:c]})})))
   (testing "Runner validates when 'uses' superset of 'updates'."
-    (is (not (job/validate {:id :test
+    (is (job/validate {:id :test
                             :uses #{}
                             :updates #{}
-                            :runner (TestJobRunner. inc #{:a :b :c :d} #{:a :b :c})}))))
+                            :runner (TestJobRunner. inc #{[:a] [:b] [:c] [:d]} #{[:a] [:b] [:c]})})))
   (testing "Runner doesn't validate when 'uses' is not a superset of 'updates'."
     (is (thrown? Exception (job/validate {:id :test
                                           :uses #{}
                                           :updates #{}
-                                          :runner (TestJobRunner. inc #{:a :b :c} #{:a :b :d})})))))
+                                          :runner (TestJobRunner. inc #{[:a] [:b] [:c]} #{[:a] [:b] [:d]})})))))
 
 
 (deftest test-apply-appends-to-specific-keys
