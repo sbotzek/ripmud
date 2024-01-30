@@ -250,10 +250,11 @@
                    (> (count results) 0)
                    (update-state (first results) (:updates job) (:appends job) (:index job)))]
       #_(locking *out*
-        #_(println "*****************************************************************" (:id job) "*****************************************************************")
-        #_(println "Job" (:id job) "total ms:" (- (System/currentTimeMillis) start-time))
-        #_(println "  Job" (:id job) " state" state)
-        #_(println "  Job" (:id job) "state'" state'))
+        (println "*****************************************************************" (:id job) "*****************************************************************")
+        (println "Job" (:id job) "total ms:" (- (System/currentTimeMillis) start-time))
+        (println "  Job" (:id job) " state" state)
+        (println "  Job" (:id job) " results" results)
+        (println "  Job" (:id job) "state'" state'))
       state')
     (catch Exception e
       (throw (ex-info (str "Error running job " (:id job)) {:job job :exception e :state state})))))
