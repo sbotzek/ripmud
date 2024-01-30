@@ -88,6 +88,12 @@
                    (update-in components [:perceptor target :perceptions] conj {:act :shout :actor actor :message arg-str}))
                  components
                  @*entities))}
+   {:name "look"
+    :restrictions []
+    :args :arg-str
+    :f (fn cmd-look[components actor arg-str]
+         (let [location (get-in components [:location actor])]
+           (update-in components [:perceptor actor :perceptions] conj {:act :look :actor actor :location location})))}
    {:name "jimmie"
     :restrictions [:player]
     :args :none
@@ -238,12 +244,31 @@
                 :shout
                 (swap! *components update-in [:telnet-output entity :output] concat [(str (actor-name actor entity components) " shouts \"" (:message action) "\"\r\n")])
 
+                :look
+                (let [location (get-in components [:location entity])
+                      contains (get-in components [:contains location])
+                      location-name (get-in components [:desc location :name])
+                      entities-str (reduce (fn [output other]
+                                             (if (= other entity)
+                                               output
+                                               (str output "You see " (get-in components [:desc other :name]) " standing here.\r\n")))
+                                           ""
+                                           contains)
+                      location-desc (str location-name "\r\n" entities-str)]
+                  (println "yo im here 1" location-desc "and" location)
+                  (println "yo im here 2" entities-str)
+                  (swap! *components update-in [:telnet-output entity :output] into [location-desc]))
+
                 (throw (ex-info (str "Unknown act: " act) {:act act}))))))))
     @*components))
 
 (defn on-playing-event
   [components {:keys [entity name]}]
-  (assoc components entity {:name name}))
+  (-> components
+      (assoc-in [:desc entity] {:name name})
+      (assoc-in [:location entity] 0)
+      (assoc-in [:contains entity] [])
+      (update-in [:contains 0] into [entity])))
 
 (defn process-npc-perceptions
   "Takes perceptions from the perceptor component and writes them to the telnet-output component."
@@ -363,8 +388,12 @@
    {:id :on-playing-event
     :f on-playing-event
     :runner (EventListenerJobRunner. :playing)
-    :uses #{[:components :desc]}
-    :updates #{[:components :desc]}}
+    :uses #{[:components :desc]
+            [:components :location]
+            [:components :contains]}
+    :updates #{[:components :desc]
+               [:components :location]
+               [:components :contains]}}
    {:id :handle-telnet-connection
     :f handle-telnet-connection
     :runner (EffectHandlerJobRunner. :telnet-connection)
@@ -402,10 +431,8 @@
     :updates #{[:components]}}
    {:id :process-player-perceptions
     :f process-player-perceptions
-    :uses #{[:components :player]
-            [:components :desc]
+    :uses #{[:components]
             [:components :perceptor]
-            [:components :telnet-state]
             [:components :telnet-output]}
     :updates #{[:components :perceptor]
                [:components :telnet-output]}}
