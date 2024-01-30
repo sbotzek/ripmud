@@ -33,14 +33,26 @@
   {:event-queue []
    :events event-queue})
 
+
+(defn add-entity-with-components
+  [components entity entity-components]
+  (reduce (fn [components [component-key component]]
+            (assoc-in components [component-key entity] component))
+          components
+          entity-components))
+
 (defn run-game-server
   [config systems]
   (dorun (map job/validate systems))
-  (let [execution-plan (job/jobs->execution-plan systems)]
+  (let [execution-plan (job/jobs->execution-plan systems)
+        start-entity (new-entity!)
+        start-entity-components {:desc {:name "The Void"}
+                                 :contains []}]
     #_(pprint execution-plan)
     (loop [game-state {:pulse 0
-                       :components {}
-                       :effects {}}]
+                       :components (add-entity-with-components {} start-entity start-entity-components)
+                       :effects {}
+                       :start-entity start-entity}]
       #_(pprint game-state)
       #_(println "game-state" game-state)
       (let [start-time (System/currentTimeMillis)]
@@ -263,12 +275,13 @@
     @*components))
 
 (defn on-playing-event
-  [components {:keys [entity name]}]
+  [{:keys [start-entity components] :as state}
+   {:keys [entity name]}]
   (-> components
       (assoc-in [:desc entity] {:name name})
-      (assoc-in [:location entity] 0)
+      (assoc-in [:location entity] start-entity)
       (assoc-in [:contains entity] [])
-      (update-in [:contains 0] into [entity])))
+      (update-in [:contains start-entity] into [entity])))
 
 (defn process-npc-perceptions
   "Takes perceptions from the perceptor component and writes them to the telnet-output component."
@@ -388,7 +401,8 @@
    {:id :on-playing-event
     :f on-playing-event
     :runner (EventListenerJobRunner. :playing)
-    :uses #{[:components :desc]
+    :uses #{[:start-entity]
+            [:components :desc]
             [:components :location]
             [:components :contains]}
     :updates #{[:components :desc]
