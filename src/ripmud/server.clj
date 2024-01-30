@@ -77,17 +77,6 @@
    :uses #{[:effects]}
    :updates #{[:effects]}})
 
-(defn slurp-events
-  [{:keys [event-queue]}]
-  {:event-queue []
-   :events event-queue})
-
-(def s-slurp-events
-  {:id :slurp-events
-   :f slurp-events
-   :uses #{[:events] [:event-queue]}
-   :updates #{[:events] [:event-queue]}})
-
 (def s-increment-pulse
   {:id :increment-pulse
    :f inc
@@ -113,7 +102,7 @@
                        :components (add-entity-with-components {} start-entity start-entity-components)
                        :effects {}
                        :start-entity start-entity}]
-      #_(pprint game-state)
+      (pprint game-state)
       #_(println "game-state" game-state)
       (let [start-time (System/currentTimeMillis)]
         (let [game-state' (job/execute-step execution-plan game-state)]
@@ -302,7 +291,7 @@
             (swap! *components assoc-in [:telnet-output entity] telnet-output')
             (swap! *components assoc-in [:command-queue entity] command-queue')))))
     {:components @*components
-     :event-queue @*events}))
+     :events @*events}))
 
 (def s-process-telnet-inputs
   {:id :process-telnet-inputs
@@ -315,7 +304,7 @@
                [:components :telnet-input]
                [:components :telnet-output]
                [:components :command-queue]}
-    :appends #{[:event-queue]}})
+    :appends #{[:events]}})
 
 (defn process-command-queue
   [components]
@@ -485,10 +474,8 @@
 (def systems
   [
    s-slurp-effects
-   s-slurp-events
    s-increment-pulse
    s-handle-add-component
-   s-on-playing-event
    s-handle-telnet-connection
    s-update-lifetimes
    s-handle-telnet-input
@@ -497,6 +484,10 @@
    s-process-player-perceptions
    s-process-npc-perceptions
    s-write-telnet-outputs
+
+   ;; event listeners go at the end
+   s-on-playing-event
+   {:id :clear-events :f (fn clear-events[_] []) :uses #{[:events]} :updates #{[:events]}}
    ])
 
 (defn -main
