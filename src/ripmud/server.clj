@@ -363,8 +363,6 @@
                                            ""
                                            contains)
                       location-desc (str location-name "\r\n" entities-str)]
-                  (println "yo im here 1" location-desc "and" location)
-                  (println "yo im here 2" entities-str)
                   (swap! *components update-in [:telnet-output entity :output] into [location-desc]))
 
                 (throw (ex-info (str "Unknown act: " act) {:act act}))))))))
