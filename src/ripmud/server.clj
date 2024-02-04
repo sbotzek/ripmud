@@ -9,13 +9,11 @@
 (def millis-per-pulse 250)
 
 (def *next-entity (ref 0))
-(def *entities (ref #{}))
 
 (defn new-entity!
   []
   (dosync
    (let [entity (alter *next-entity inc)]
-     (alter *entities conj entity)
      entity)))
 
 (defn make-effect-handler-job-runner
@@ -150,7 +148,7 @@
          (reduce (fn [components target]
                    (update-in components [:perceptor target :perceptions] conj {:act :shout :actor actor :message arg-str}))
                  components
-                 @*entities))}
+                 (keys (:player components))))}
    {:name "look"
     :restrictions []
     :args :arg-str
