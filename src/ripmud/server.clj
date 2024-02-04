@@ -18,48 +18,36 @@
      (alter *entities conj entity)
      entity)))
 
-(defrecord EffectHandlerJobRunner [handle-effect]
-  job/JobRunner
-  (run [{:keys [handle-effect] :as this}
-        effects
-        {:keys [f] :as job}
-        job-arg]
-    (when (seq effects)
-      (let [job-result (reduce f job-arg effects)]
-        [job-result nil])))
-  (uses [this]
-    #{[:effects handle-effect]})
-  (updates [this]
-    #{[:effects handle-effect]})
-  (appends [this] #{}))
+(defn make-effect-handler-job-runner
+  [handle-effect]
+  {:f (fn effect-handler-job-runner-f [effects
+                                       {:keys [f] :as job}
+                                       job-arg]
+        (when (seq effects)
+          (let [job-result (reduce f job-arg effects)]
+            [job-result nil])))
+   :uses #{[:effects handle-effect]}
+   :updates #{[:effects handle-effect]}})
 
-(defrecord EventListenerJobRunner [handle-events]
-  job/JobRunner
-  (run [{:keys [handle-events] :as this}
-        events
-        {:keys [f] :as job}
-        job-arg]
-    (let [events-handling (filter #(= handle-events (:type %)) events)]
-      (when (seq events-handling)
-        (let [job-result (reduce f job-arg events-handling)]
-          [job-result nil]))))
-  (uses [this]
-    #{[:events]})
-  (updates [this]
-    #{}))
+(defn make-event-listener-job-runner
+  [handle-events]
+  {:f (fn event-listener-job-runner-f [events
+                                       {:keys [f] :as job}
+                                       job-arg]
+        (let [events-handling (filter #(= handle-events (:type %)) events)]
+          (when (seq events-handling)
+            (let [job-result (reduce f job-arg events-handling)]
+              [job-result nil]))))
+   :uses #{[:events]}})
 
-(defrecord PeriodicJobRunner [pulses]
-  job/JobRunner
-  (run [this pulse
-        {:keys [f] :as job} job-arg]
-    (when (zero? (mod pulse (:pulses this)))
-      [(f job-arg)]))
-  (uses [this]
-    #{[:pulse]})
-  (updates [this]
-    #{})
-  (appends [this]
-    #{}))
+(defn make-periodic-job-runner
+  [pulses]
+  {:f (fn periodic-job-runner-f [pulse
+                                 {:keys [f] :as job}
+                                 job-arg]
+        (when (zero? (mod pulse pulses))
+          [(f job-arg)]))
+   :uses #{[:pulse]}})
 
 ;;; Effects are for things that come about from outside a system, like input
 ;;; from a telnet socket.  Once a system handles an effect, it is discarded.
@@ -102,7 +90,7 @@
                        :components (add-entity-with-components {} start-entity start-entity-components)
                        :effects {}
                        :start-entity start-entity}]
-      (pprint game-state)
+      #_(pprint game-state)
       #_(println "game-state" game-state)
       (let [start-time (System/currentTimeMillis)]
         (let [game-state' (job/execute-step execution-plan game-state)]
@@ -120,7 +108,7 @@
 (def s-handle-add-component
   {:id :handle-add-component
    :f handle-add-component
-   :runner (EffectHandlerJobRunner. :add-component)
+   :runner (make-effect-handler-job-runner :add-component)
    :uses #{[:components]}
    :updates #{[:components]}})
 
@@ -134,7 +122,7 @@
 (def s-handle-telnet-input
   {:id :handle-telnet-input
     :f handle-telnet-input
-    :runner (EffectHandlerJobRunner. :telnet-input)
+    :runner (make-effect-handler-job-runner :telnet-input)
     :uses #{[:components :telnet-input]}
     :updates #{[:components :telnet-input]}})
 
@@ -259,7 +247,7 @@
 (def s-handle-telnet-connection
   {:id :handle-telnet-connection
    :f handle-telnet-connection
-   :runner (EffectHandlerJobRunner. :telnet-connection)
+   :runner (make-effect-handler-job-runner :telnet-connection)
    :uses #{[:components :telnet-state]
            [:components :telnet-input]
            [:components :telnet-output]
@@ -387,7 +375,7 @@
 (def s-on-playing-event
   {:id :on-playing-event
    :f on-playing-event
-   :runner (EventListenerJobRunner. :playing)
+   :runner (make-event-listener-job-runner :playing)
    :uses #{[:start-entity]
            [:components :desc]
            [:components :location]

@@ -30,16 +30,6 @@
     :uses #{[:b] [:c] [:e]}
     :updates #{[:e]}}])
 
-(defrecord TestJobRunner[f uses updates]
-  job/JobRunner
-  (run [this runner-arg job job-arg]
-    [((:f job) job-arg) ((:f this) runner-arg)])
-  (uses [this]
-    (:uses this))
-  (updates [this]
-    (:updates this)))
-
-
 (deftest test-f-arg
   (testing "Only returns keys that are used by the job."
     (is (= {:a 1 :b 3}
@@ -126,17 +116,17 @@
     (is (job/validate {:id :test
                             :uses #{}
                             :updates #{}
-                            :runner (TestJobRunner. inc #{[:a] [:b] [:c]} #{[:a] [:b] [:c]})})))
+                            :runner {:f inc :uses #{[:a] [:b] [:c]} :updates #{[:a] [:b] [:c]}}})))
   (testing "Runner validates when 'uses' superset of 'updates'."
     (is (job/validate {:id :test
                             :uses #{}
                             :updates #{}
-                            :runner (TestJobRunner. inc #{[:a] [:b] [:c] [:d]} #{[:a] [:b] [:c]})})))
+                            :runner {:f inc :uses #{[:a] [:b] [:c] [:d]} :updates #{[:a] [:b] [:c]}}})))
   (testing "Runner doesn't validate when 'uses' is not a superset of 'updates'."
     (is (thrown? Exception (job/validate {:id :test
                                           :uses #{}
                                           :updates #{}
-                                          :runner (TestJobRunner. inc #{[:a] [:b] [:c]} #{[:a] [:b] [:d]})})))))
+                                          :runner {:f inc :uses #{[:a] [:b] [:c]} :updates #{[:a] [:b] [:d]}}})))))
 
 
 (deftest test-apply-appends-to-specific-keys
@@ -254,24 +244,24 @@
                                {:uses #{[:a :c]}
                                 :updates #{}}))))
   (testing "Runners updating overlap with eachother."
-    (is (job/overlapping? {:runner (TestJobRunner. inc #{[:effects]} #{[:effects]})
+    (is (job/overlapping? {:runner {:f inc :uses #{[:effects]} :updates #{[:effects]}}
                            :uses #{}
                            :updates #{}}
-                          {:runner (TestJobRunner. inc #{[:effects]} #{[:effects]})
+                          {:runner {:f inc :uses #{[:effects]} :updates #{[:effects]}}
                            :uses #{}
                            :updates #{}})))
   (testing "Runners updating overlap with jobs."
-    (is (job/overlapping? {:runner (TestJobRunner. inc #{[:effects]} #{[:effects]})
+    (is (job/overlapping? {:runner {:f inc :uses #{[:effects]} :updates #{[:effects]}}
                            :uses #{}
                            :updates #{}}
                           {:uses #{[:effects]}
                            :updates #{}}))
     (is (job/overlapping? {:uses #{[:effects]}
                            :updates #{}}
-                          {:runner (TestJobRunner. inc #{[:effects]} #{[:effects]})
+                          {:runner {:f inc :uses #{[:effects]} :updates #{[:effects]}}
                            :uses #{}
                            :updates #{}}))
-    (is (job/overlapping? {:runner (TestJobRunner. inc #{[:effects]} #{[:effects]})
+    (is (job/overlapping? {:runner {:f inc :uses #{[:effects]} :updates #{[:effects]}}
                            :uses #{}
                            :updates #{}}
                           {:uses #{[:effects :blub]}
@@ -365,27 +355,27 @@
             :b+c+e #{:a+b+e :c2}}
            (job/jobs->dependency-graph complex-test-jobs)))))
 
-(deftest test-run-job
+(deftest test-run
   (testing "single key"
     (is (= {:a 1 :b 2 :c 4}
-           (job/run-job {:a 1 :b 2 :c 3}
+           (job/run {:a 1 :b 2 :c 3}
                         {:id :test :uses #{[:c]} :updates #{[:c]} :f inc}))))
   (testing "multiple key"
     (is (= {:a 1 :b 3 :c 4}
-           (job/run-job {:a 1 :b 2 :c 3}
+           (job/run {:a 1 :b 2 :c 3}
                         {:id :test :uses #{[:b] [:c]} :updates #{[:b] [:c]}
                          :f (fn [m] (update-vals m inc))}))))
   (testing "updating runner"
     (is (= {:a 10 :b 3 :c 4}
-           (job/run-job {:a 1 :b 2 :c 3}
+           (job/run {:a 1 :b 2 :c 3}
                         {:id :test :uses #{[:b] [:c]} :updates #{[:b] [:c]}
-                         :runner (TestJobRunner. #(* 10 %) #{[:a]} #{[:a]})
+                         :runner {:f (fn [runner-arg job job-arg] [((:f job) job-arg) (* 10 runner-arg)]) :uses #{[:a]} :updates #{[:a]}}
                          :f (fn [m] (update-vals m inc))}))))
   (testing "multi-key runner update"
     (is (= {:a 10 :b 3 :c 4 :d 40}
-           (job/run-job {:a 1 :b 2 :c 3 :d 4}
+           (job/run {:a 1 :b 2 :c 3 :d 4}
                         {:id :test :uses #{[:b] [:c]} :updates #{[:b] [:c]}
-                         :runner (TestJobRunner. #(update-vals % (fn [v] (* v 10))) #{[:a] [:d]} #{[:a] [:d]})
+                         :runner {:f (fn [runner-arg job job-arg] [((:f job) job-arg) (update-vals runner-arg (fn [v] (* v 10)))]) :uses #{[:a] [:d]} :updates #{[:a] [:d]}}
                          :f (fn [m] (update-vals m inc))})))))
 
 (deftest test-execute-step

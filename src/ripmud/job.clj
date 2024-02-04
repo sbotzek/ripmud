@@ -1,28 +1,11 @@
 ;;;; Contains functions for running and automatically parallelizing a list of jobs.
 
 (ns ripmud.job
-  (:require [clojure.set :as set]))
+  (:require [clojure.set :as set]
+            [clojure.pprint :refer [pprint]]))
 
-(defprotocol JobRunner
-  "A protocol for customizing how jobs are run."
-  (run [this runner-arg job job-arg])
-  (uses [this])
-  (updates [this])
-  (appends [this]))
-
-(defrecord SimpleJobRunner []
-  JobRunner
-  (run [this _runner-arg
-        {:keys [f] :as job} job-arg]
-    [(f job-arg)])
-  (uses [this]
-    #{})
-  (updates [this]
-    #{})
-  (appends [this]
-    #{}))
-
-(def *default-job-runner (atom (SimpleJobRunner.)))
+(def *default-job-runner (atom {:f (fn default-job-runner-f[_runner-arg {:keys [f] :as job} job-arg]
+                                     [(f job-arg)])}))
 
 (defn f-arg
   "Returns the args a function needs based upon what it uses."
@@ -139,8 +122,8 @@
     (throw (ex-info (str "Job " id " 'appends' contained in 'uses'") {:job job}))
 
     (and runner
-         (not (= (uses runner) (updates runner)))
-         (not (set/subset? (updates runner) (uses runner))))
+         (not (= (:uses runner) (:updates runner)))
+         (not (set/subset? (:updates runner) (:uses runner))))
     (throw (ex-info (str "Job " id "'s runner 'updates' is not a subset of 'uses'.") {:job job}))
 
     :else
@@ -152,10 +135,10 @@
   [job1 job2]
   (let [runner1 (or (:runner job1) @*default-job-runner)
         runner2 (or (:runner job2) @*default-job-runner)
-        uses1 (into (:uses job1) (uses runner1))
-        uses2 (into (:uses job2) (uses runner2))
-        updates1 (into #{} (concat (:updates job1) (:appends job1) (updates runner1)))
-        updates2 (into #{} (concat (:updates job2) (:appends job2) (updates runner2)))]
+        uses1 (into (:uses job1) (:uses runner1))
+        uses2 (into (:uses job2) (:uses runner2))
+        updates1 (into #{} (concat (:updates job1) (:appends job1) (:updates runner1)))
+        updates2 (into #{} (concat (:updates job2) (:appends job2) (:updates runner2)))]
     (or (some (fn [update]
                 (some (fn [uses]
                         (let [c (min (count update) (count uses))]
@@ -235,26 +218,27 @@
                graph')
         graph'))))
 
-(defn run-job
+(defn run
   "Runs a job."
   [state {:keys [runner] :or {runner @*default-job-runner} :as job}]
   (try
     (let [start-time (System/currentTimeMillis)
           job-arg (f-arg (:uses job) state)
-          runner-arg (f-arg (uses runner) state)
-          results (run runner runner-arg job job-arg)
+          runner-f (:f runner)
+          runner-arg (f-arg (:uses runner) state)
+          results (runner-f runner-arg job job-arg)
           state' (cond-> state
                    (> (count results) 1)
-                   (update-state (second results) (updates runner))
+                   (update-state (second results) (:updates runner))
 
                    (> (count results) 0)
                    (update-state (first results) (:updates job) (:appends job) (:index job)))]
       #_(locking *out*
         (println "*****************************************************************" (:id job) "*****************************************************************")
         (println "Job" (:id job) "total ms:" (- (System/currentTimeMillis) start-time))
-        (println "  Job" (:id job) " state" state)
-        (println "  Job" (:id job) " results" results)
-        (println "  Job" (:id job) "state'" state'))
+        (println "  Job" (:id job) "state  " state)
+        (println "  Job" (:id job) "results" results)
+        (println "  Job" (:id job) "state' " state'))
       state')
     (catch Exception e
       (throw (ex-info (str "Error running job " (:id job)) {:job job :exception e :state state})))))
@@ -329,12 +313,12 @@
                                                                                   in-graph-updates (into #{} (mapcat (fn job-updates[{:keys [runner] :as job}]
                                                                                                                        (cond-> (:updates job)
                                                                                                                          runner
-                                                                                                                         (concat (updates runner))))
+                                                                                                                         (concat (:updates runner))))
                                                                                                                      in-graph-jobs))
                                                                                   in-graph-appends (into #{} (mapcat (fn job-updates[{:keys [runner] :as job}]
                                                                                                                        (cond-> (:appends job)
                                                                                                                          runner
-                                                                                                                         (concat (appends runner))))
+                                                                                                                         (concat (:appends runner))))
                                                                                                                      in-graph-jobs))]
                                                                               (merge-keys state-acc job-state in-graph-updates in-graph-appends)))))
                                                                       nil
@@ -343,8 +327,8 @@
                                                                    ;; TODO no test tests that we factor in the runner
                                                                    (apply-appends (cond-> (:uses job)
                                                                                     (:runner job)
-                                                                                    (concat (uses (:runner job)))))
-                                                                   (run-job job))]
+                                                                                    (concat (:uses (:runner job)))))
+                                                                   (run job))]
                                                     (doseq [queue output-queues]
                                                       (.offer queue state'))
                                                     (recur)))]
