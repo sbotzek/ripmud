@@ -162,14 +162,14 @@
 
 (def cmd-jimmie
   {:name "jimmie"
-   :restrictions [:player]
+   :restrictions [player?]
    :args :none
    :f (fn [components actor arg-str]
         (update-in components [:telnet-output actor :output] concat ["JIMMMIEEEE! JIMMIE JIMMIE JIMMIESON!\r\n"]))})
 
 (def cmd-components
   {:name "components"
-   :restrictions [:player]
+   :restrictions [player?]
    :args :arg-list
    :f (fn [components actor arg-str]
         (let [target (if (seq arg-str)
@@ -185,7 +185,7 @@
 
 (def cmd-quit
   {:name "quit"
-   :restrictions [:player]
+   :restrictions [player?]
    :args :str-cmd
    :f (fn [components actor str-cmd]
         (update-in components [:telnet-output actor :output] concat ["Quit not implemented, you're stuck here forever!\r\n"]))})
@@ -199,10 +199,7 @@
 
 (defn can-use-cmd?
   [cmd entity components]
-  (every? (fn [restriction]
-            (case restriction
-              :player (player? entity components)
-              (throw (ex-info (str "Unknown restriction: " restriction) {:restriction restriction}))))
+  (every? #(% entity components)
           (:restrictions cmd)))
 
 (defrecord TelnetStatePlaying [name]
