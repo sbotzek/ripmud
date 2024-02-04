@@ -135,51 +135,67 @@
   (telnet-state-input [state entity telnet-input telnet-output command-queue])
   (telnet-state-left [state telnet-input telnet-output]))
 
-(def command-table
-  [{:name "say"
-    :restrictions []
-    :args :arg-str
-    :f (fn [components actor arg-str]
-         (update-in components [:perceptor actor :perceptions] concat [{:act :say :actor actor :message arg-str}]))}
-   {:name "shout"
-    :restrictions []
-    :args :arg-str
-    :f (fn [components actor arg-str]
-         (reduce (fn [components target]
-                   (update-in components [:perceptor target :perceptions] conj {:act :shout :actor actor :message arg-str}))
-                 components
-                 (keys (:player components))))}
-   {:name "look"
-    :restrictions []
-    :args :arg-str
-    :f (fn cmd-look[components actor arg-str]
-         (let [location (get-in components [:location actor])]
-           (update-in components [:perceptor actor :perceptions] conj {:act :look :actor actor :location location})))}
-   {:name "jimmie"
-    :restrictions [:player]
-    :args :none
-    :f (fn [components actor arg-str]
-         (update-in components [:telnet-output actor :output] concat ["JIMMMIEEEE! JIMMIE JIMMIE JIMMIESON!\r\n"]))}
+(def cmd-say
+  {:name "say"
+   :restrictions []
+   :args :arg-str
+   :f (fn [components actor arg-str]
+        (update-in components [:perceptor actor :perceptions] concat [{:act :say :actor actor :message arg-str}]))})
 
-   {:name "components"
-    :restrictions [:player]
-    :args :arg-list
-    :f (fn [components actor arg-str]
-         (let [target (if (seq arg-str)
-                        (parse-long (first arg-str))
-                        actor)
-               output (reduce (fn [components-str [component-key components]]
-                   (if-let [component (get components target)]
-                     (str components-str component-key ": " (get components target) "\r\n")
-                     components-str))
-                 ""
-                 components)]
-            (update-in components [:telnet-output actor :output] concat [output])))}
-   {:name "quit"
-    :restrictions [:player]
-    :args :str-cmd
-    :f (fn [components actor str-cmd]
-         (update-in components [:telnet-output actor :output] concat ["Quit not implemented, you're stuck here forever!\r\n"]))}])
+(def cmd-shout
+  {:name "shout"
+   :restrictions []
+   :args :arg-str
+   :f (fn [components actor arg-str]
+        (reduce (fn [components target]
+                  (update-in components [:perceptor target :perceptions] conj {:act :shout :actor actor :message arg-str}))
+                components
+                (keys (:player components))))})
+
+(def cmd-look
+  {:name "look"
+   :restrictions []
+   :args :arg-str
+   :f (fn cmd-look[components actor arg-str]
+        (let [location (get-in components [:location actor])]
+          (update-in components [:perceptor actor :perceptions] conj {:act :look :actor actor :location location})))})
+
+(def cmd-jimmie
+  {:name "jimmie"
+   :restrictions [:player]
+   :args :none
+   :f (fn [components actor arg-str]
+        (update-in components [:telnet-output actor :output] concat ["JIMMMIEEEE! JIMMIE JIMMIE JIMMIESON!\r\n"]))})
+
+(def cmd-components
+  {:name "components"
+   :restrictions [:player]
+   :args :arg-list
+   :f (fn [components actor arg-str]
+        (let [target (if (seq arg-str)
+                       (parse-long (first arg-str))
+                       actor)
+              output (reduce (fn [components-str [component-key components]]
+                               (if-let [component (get components target)]
+                                 (str components-str component-key ": " (get components target) "\r\n")
+                                 components-str))
+                             ""
+                             components)]
+          (update-in components [:telnet-output actor :output] concat [output])))})
+
+(def cmd-quit
+  {:name "quit"
+   :restrictions [:player]
+   :args :str-cmd
+   :f (fn [components actor str-cmd]
+        (update-in components [:telnet-output actor :output] concat ["Quit not implemented, you're stuck here forever!\r\n"]))})
+
+(def command-table
+  [cmd-say
+   cmd-shout
+   cmd-look
+   cmd-jimmie
+   cmd-components])
 
 (defn can-use-cmd?
   [cmd entity components]
