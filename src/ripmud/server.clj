@@ -135,6 +135,21 @@
   (telnet-state-input [state entity telnet-input telnet-output command-queue])
   (telnet-state-left [state telnet-input telnet-output]))
 
+(defn target-entity-id
+  [descs arg-str]
+  (if-let [target (parse-long arg-str)]
+    target
+    (let [arg-str (str/lower-case arg-str)
+          [target-n kw] (if-let [idx (str/index-of arg-str ".")]
+                          [(dec (parse-long (str/trim (subs arg-str 0 idx)))) (subs arg-str (inc idx))]
+                          [0 arg-str])
+          targets (map first (filter (fn [[entity desc]]
+                                       (str/starts-with? (:name desc) kw))
+                                     descs))]
+      (if (< -1 target-n (count targets))
+        (nth targets target-n)
+        nil))))
+
 (def cmd-say
   {:name "say"
    :restrictions []
@@ -172,16 +187,18 @@
    :restrictions [player?]
    :args :arg-list
    :f (fn [components actor arg-str]
-        (let [target (if (seq arg-str)
-                       (parse-long (first arg-str))
-                       actor)
-              output (reduce (fn [components-str [component-key components]]
-                               (if-let [component (get components target)]
-                                 (str components-str component-key ": " (get components target) "\r\n")
-                                 components-str))
-                             ""
-                             components)]
-          (update-in components [:telnet-output actor :output] concat [output])))})
+        (if-let [target (if (seq arg-str)
+                          (target-entity-id (:desc components) (first arg-str))
+                          actor)]
+          (let [output (reduce (fn [components-str [component-key components]]
+                                 (if-let [component (get components target)]
+                                   (str components-str component-key ": " (get components target) "\r\n")
+                                   components-str))
+                               ""
+                               components)
+                output (str ":entity " target "\r\n" output)]
+            (update-in components [:telnet-output actor :output] concat [output]))
+          (update-in components [:telnet-output actor :output] concat [(str "Could not find '" (first arg-str) "'\r\n")])))})
 
 (def cmd-quit
   {:name "quit"
